@@ -5,7 +5,10 @@
 # ============================================================
 
 # Azure
-$SUBSCRIPTION_ID = "sub-Id"  # <-- replace
-$RESOURCE_GROUP  = "Azure-SRE-Agent-Demo_RG"
-$LOCATION        = "canadacentral"
-$CLUSTER_NAME    = "Azure-SRE-Agent-Demo-Cluster"
+$SUBSCRIPTION_ID   = "ab021129-9bf3-4ee3-bbc6-3da839fb88a1"
+$RESOURCE_GROUP    = "rg-sre-aks"
+$LOCATION          = "swedencentral"
+$CLUSTER_NAME      = "aks-sre-agent-demo"
+$KUBERNETES_VERSION = "1.35.7"
+$NODE_VM_SIZE      = "Standard_D4s_v5"
+$NODE_COUNT        = 1

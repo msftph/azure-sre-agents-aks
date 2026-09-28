@@ -7,6 +7,8 @@ This folder contains PowerShell scripts to deploy an AKS cluster with **Node Aut
 - [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) installed
 - [kubectl](https://kubernetes.io/docs/tasks/tools/) installed
 - An Azure subscription with permissions to create AKS clusters
+- Permission to register subscription features, or a policy exemption if your
+  organization appends `FirstPartyUsage` tags to public IP addresses
 - PowerShell 7+ (recommended)
 
 ## Before You Start
@@ -59,11 +61,16 @@ Loads shared environment variables (`$SUBSCRIPTION_ID`, `$RESOURCE_GROUP`, `$LOC
 ```
 
 - Sets the active Azure subscription
-- Registers the `NodeAutoProvisioningPreview` feature flag (waits until registered)
-- Refreshes the `Microsoft.ContainerService` provider
+- Registers `Microsoft.Network/AllowBringYourOwnPublicIpAddress` when required
+  by enterprise public-IP tagging policies
+- Refreshes the `Microsoft.Network` and `Microsoft.ContainerService` providers
 - Installs/updates the `aks-preview` CLI extension
 
-> **Note:** Feature registration can take 5-15 minutes.
+> **Note:** Network feature registration can take several minutes. If it does
+> not complete within 30 minutes, request tenant approval for the feature or an
+> exemption from the policy that appends `FirstPartyUsage` tags to public IPs.
+> The script stops before AKS provisioning rather than leaving a partial
+> cluster behind.
 
 ---
 
@@ -82,6 +89,8 @@ Loads shared environment variables (`$SUBSCRIPTION_ID`, `$RESOURCE_GROUP`, `$LOC
 - Downloads cluster credentials to your kubeconfig
 
 > **Note:** Cluster creation takes ~5-10 minutes.
+> Azure CLI failures terminate the script, so it will not print a successful
+> deployment message after a failed or partial cluster creation.
 
 ---
 
