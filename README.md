@@ -64,7 +64,7 @@ Loads shared environment variables (`$SUBSCRIPTION_ID`, `$RESOURCE_GROUP`, `$LOC
 - Registers `Microsoft.Network/AllowBringYourOwnPublicIpAddress` when required
   by enterprise public-IP tagging policies
 - Refreshes the `Microsoft.Network` and `Microsoft.ContainerService` providers
-- Installs/updates the `aks-preview` CLI extension
+- Uses the installed `aks-preview` CLI extension, or installs it when missing
 
 > **Note:** Network feature registration can take several minutes. If it does
 > not complete within 30 minutes, request tenant approval for the feature or an

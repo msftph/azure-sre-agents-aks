@@ -92,11 +92,11 @@ Register-AzProvider "Microsoft.Network"
 # NAP is generally available. Ensure the resource provider is registered.
 Register-AzProvider "Microsoft.ContainerService"
 
-# Install / update the aks-preview CLI extension
+# Install the aks-preview CLI extension when it is not already available.
+# Avoid making a working deployment depend on extension-index availability.
 az extension show --name aks-preview --only-show-errors 2>$null | Out-Null
 if ($LASTEXITCODE -eq 0) {
-    az extension update --name aks-preview
-    Assert-AzCliSucceeded "Updating the aks-preview Azure CLI extension"
+    Write-Host "Using the installed aks-preview Azure CLI extension."
 } else {
     az extension add --name aks-preview
     Assert-AzCliSucceeded "Installing the aks-preview Azure CLI extension"
