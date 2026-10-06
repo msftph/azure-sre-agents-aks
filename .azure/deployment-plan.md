@@ -170,9 +170,9 @@ The Azure quota CLI was used first after registering `Microsoft.Quota`.
 - [x] Generate Bicep modules and documentation
 - [x] Set plan status to `Ready for Validation`
 - [x] Invoke `azure-validate`
-- [ ] Commit with Copilot trailers
-- [ ] Push to the `fork` remote
-- [ ] Open PR against `msftph:main`
+- [x] Commit with Copilot trailers
+- [x] Push to the `fork` remote
+- [x] Open PR against `msftph:main`
 
 ---
 
