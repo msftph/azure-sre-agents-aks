@@ -7,6 +7,7 @@ This folder contains PowerShell scripts to deploy an AKS cluster with **Node Aut
 - [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) installed
 - [kubectl](https://kubernetes.io/docs/tasks/tools/) installed
 - An Azure subscription with permissions to create AKS clusters
+- Permission to create role assignments when deploying the Azure SRE Agent
 - PowerShell 7+ (recommended)
 
 ## Before You Start
@@ -82,6 +83,66 @@ Loads shared environment variables (`$SUBSCRIPTION_ID`, `$RESOURCE_GROUP`, `$LOC
 - Downloads cluster credentials to your kubeconfig
 
 > **Note:** Cluster creation takes ~5-10 minutes.
+
+---
+
+### Step 2A — Deploy the VNet-integrated Azure SRE Agent
+
+The Bicep deployment under `infra/` creates or incrementally updates:
+
+- a dedicated VNet and `/27` subnet delegated to `Microsoft.App/environments`
+- the SRE Agent user-assigned managed identity
+- Log Analytics and Application Insights resources
+- the `Microsoft.App/agents` resource
+- Azure Monitor, Log Analytics, and Application Insights connectors
+- the monitoring and AKS role assignments required by this demo
+
+```powershell
+az deployment group create `
+  --name sre-agent-infrastructure `
+  --resource-group $RESOURCE_GROUP `
+  --template-file .\infra\main.bicep `
+  --parameters .\infra\main.bicepparam `
+  aksClusterName=$CLUSTER_NAME
+```
+
+The template uses the stable demo resource names, so an incremental deployment
+updates an existing `sre-agent-aks-demo` environment rather than creating a
+second agent.
+
+If the target environment already has equivalent manually created role
+assignments, disable role creation to avoid `RoleAssignmentExists` conflicts:
+
+```powershell
+az deployment group create `
+  --name sre-agent-infrastructure `
+  --resource-group $RESOURCE_GROUP `
+  --template-file .\infra\main.bicep `
+  --parameters .\infra\main.bicepparam `
+  aksClusterName=$CLUSTER_NAME `
+  deployRoleAssignments=false
+```
+
+Connect AKS Container Insights to the workspace created by the deployment:
+
+```powershell
+$LAW_ID = az deployment group show `
+  --resource-group $RESOURCE_GROUP `
+  --name sre-agent-infrastructure `
+  --query properties.outputs.logAnalyticsWorkspaceId.value `
+  --output tsv
+
+az aks enable-addons `
+  --resource-group $RESOURCE_GROUP `
+  --name $CLUSTER_NAME `
+  --addons monitoring `
+  --workspace-resource-id $LAW_ID
+```
+
+> **VNet scope:** This adds VNet integration for the SRE Agent sandbox. It does
+> not convert AKS to a private cluster, add private endpoints, or force egress
+> through Azure Firewall. The current public AKS API remains reachable while
+> the agent gains a delegated network placement for future private resources.
 
 ---
 
@@ -171,42 +232,41 @@ kubectl exec rabbitmq-0 -n pets -- rabbitmqctl list_queues
 
 ---
 
-### Step 8 — Configure Azure SRE Agent (Portal)
+### Step 8 — Verify and Extend Azure SRE Agent Configuration
 
-This step is performed in the Azure portal at **[sre.azure.com](https://sre.azure.com)**.
+The Bicep deployment in Step 2A creates the agent, its identities, managed
+resource scope, VNet integration, core connectors, and scenario-specific Azure
+RBAC. Open **[sre.azure.com](https://sre.azure.com)** to verify the deployment
+and configure optional integrations such as GitHub and Teams.
 
 Azure SRE Agent configuration for this demo came down to four things: **scope**, **permissions**, **incident intake**, and **response mode**.
 
-**A — Create the agent and scope it correctly**
+**A — Verify the agent scope**
 
-1. Create an Azure SRE Agent resource and scope it to the demo resource group.
-2. During deployment, Azure SRE Agent creates two managed identities:
+1. Confirm `sre-agent-aks-demo` lists the demo resource group as a managed resource.
+2. Confirm the deployment created two managed identities:
     - a **user-assigned managed identity (UAMI)** used for RBAC and connector access
     - a system-assigned identity used internally by the service
-3. Use the **UAMI** for the role assignments and connector setup below.
-4. Add the demo resource group as a **managed resource** so the agent can investigate resources within that scope.
+3. Confirm the agent shows a delegated subnet under its VNet configuration.
 
-**B — Grant scenario-specific AKS access**
+**B — Verify scenario-specific AKS access**
 
-Core monitoring roles are assigned during setup. For this demo, I added AKS-specific rights so the agent could complete remediation end to end. Treat these as **scenario-specific**, not a default production baseline.
+The Bicep template assigns the following scenario-specific permissions when
+`deployRoleAssignments=true`:
 
-```bash
-az role assignment create \
-   --assignee "<uami-client-id>" \
-   --role "Azure Kubernetes Service Cluster Admin Role" \
-   --scope "/subscriptions/<sub-id>/resourcegroups/Azure-SRE-Agent-Demo_RG"
+- Reader
+- Monitoring Reader and Monitoring Contributor
+- Log Analytics Reader
+- Azure Kubernetes Service Cluster Admin Role
+- Azure Kubernetes Service Contributor Role
 
-az role assignment create \
-   --assignee "<uami-client-id>" \
-   --role "Azure Kubernetes Service Contributor Role" \
-   --scope "/subscriptions/<sub-id>/resourcegroups/Azure-SRE-Agent-Demo_RG"
-```
+Treat these as **demo-specific**, not a default production baseline.
 
 **C — Connect Azure Monitor as the incident platform**
 
-1. In Azure SRE Agent, configure **Azure Monitor** as the incident platform.
-2. Copy the generated webhook URL.
-3. Route the AKS alert to that webhook through an Azure Monitor **Action Group**.
+The Bicep deployment creates the Azure Monitor connector and configures Azure
+Monitor as the incident platform. Confirm the connector reports **Connected**
+before reproducing an incident.
 
 This distinction matters: Azure Monitor handles how incidents **enter** the workflow, while connectors such as GitHub and Teams extend the workflow **outward** for tracking and communication.
 
