@@ -131,6 +131,7 @@ module sreAgent './modules/sre-agent.bicep' = {
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
     applicationInsightsId: monitoring.outputs.applicationInsightsId
     applicationInsightsAppId: monitoring.outputs.applicationInsightsAppId
+    applicationInsightsName: applicationInsightsName
     deployRoleAssignments: deployRoleAssignments
   }
 }

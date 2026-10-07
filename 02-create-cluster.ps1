@@ -71,7 +71,10 @@ $privateDnsZones = az network private-dns zone list `
 Assert-AzCliSucceeded "Listing AKS private DNS zones"
 
 $privateDnsZone = $privateDnsZones |
-  Where-Object { $_.name -like "*.privatelink.$LOCATION.azmk8s.io" } |
+  Where-Object {
+      $_.name -like "*.private.$LOCATION.azmk8s.io" -or
+      $_.name -like "*.privatelink.$LOCATION.azmk8s.io"
+  } |
   Select-Object -First 1
 
 if ($null -eq $privateDnsZone) {

@@ -22,6 +22,9 @@ param applicationInsightsId string
 @description('Application ID of the Application Insights component.')
 param applicationInsightsAppId string
 
+@description('Name of the Application Insights component.')
+param applicationInsightsName string
+
 @description('Create role assignments required by the AKS incident-response demo.')
 param deployRoleAssignments bool
 
@@ -43,6 +46,10 @@ resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-
 
 resource aksCluster 'Microsoft.ContainerService/managedClusters@2024-09-01' existing = {
   name: aksClusterName
+}
+
+resource applicationInsights 'Microsoft.Insights/components@2020-02-02' existing = {
+  name: applicationInsightsName
 }
 
 #disable-next-line BCP081
@@ -102,6 +109,7 @@ resource sreAgent 'Microsoft.App/agents@2025-05-01-preview' = {
       applicationInsightsConfiguration: {
         appId: applicationInsightsAppId
         applicationInsightsResourceId: applicationInsightsId
+        connectionString: applicationInsights.properties.ConnectionString
       }
     }
     monthlyAgentUnitLimit: 10000

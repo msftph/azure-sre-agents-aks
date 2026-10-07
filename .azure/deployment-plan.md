@@ -130,6 +130,57 @@ the live AKS cluster as part of template validation.
 | Destructive changes | What-if deletion count | 0 |
 | Deployment | Not requested and not performed | N/A |
 
+### Deployment Error Recovery
+
+- Initial SRE Agent update failed with
+  `InvalidApplicationInsightsConfiguration` because the service now requires
+  Application Insights `AppId` and `ConnectionString` together.
+- The SRE Agent module now resolves the existing component's connection string
+  inside the deployment module. It is not committed, logged, or exposed as a
+  module output.
+- The private DNS discovery script now supports both API Server VNet
+  Integration zones (`*.private.<region>.azmk8s.io`) and Private Link zones
+  (`*.privatelink.<region>.azmk8s.io`).
+- Recovery validation completed:
+  - full Bicep compilation and linting passed
+  - ARM validation passed with the live cluster name and existing role
+    assignments preserved
+  - the authoritative Bicep validation recipe passed
+
+### Live Deployment Verification
+
+Deployment completed on 2026-10-07 in `swedencentral`.
+
+| Check | Result |
+|-------|--------|
+| AKS provisioning | `Succeeded`, power state `Running`, Kubernetes `1.35.8` |
+| Private control plane | Private cluster enabled; public FQDN absent |
+| API Server VNet Integration | Enabled on `snet-aks-api-server` |
+| AKS nodes | Three nodes Ready with private `10.224.0.x` addresses and no node public IPs |
+| Network stack | Azure CNI Overlay and Cilium; Cilium DaemonSet 3/3 Ready |
+| Bastion | Standard SKU, native tunneling enabled, provisioning `Succeeded` |
+| Bastion connectivity | `kubectl cluster-info` and Kubernetes API calls succeeded through local port `50001` |
+| VNet peering | Both management-to-AKS and AKS-to-management peerings `Connected` |
+| Private DNS | AKS and management VNets linked; API record resolves to `10.224.16.4` |
+| SRE Agent | Provisioning `Succeeded`, `AzureVNet` egress, private DNS resolution enabled |
+| AKS identity RBAC | Network Contributor present on node and API server subnets |
+| SRE Agent RBAC | AKS Cluster Admin and AKS Contributor access present at resource-group scope |
+| Container Insights | Enabled and connected to `law-sre-agent-aks-demo` |
+| Control-plane diagnostics | `aks-sre-agent-logs` enabled for the required AKS categories |
+| Demo workload | All nine pets namespace pods Running and Ready |
+| Workload ingress | Store Front `10.224.0.7`; Store Admin `10.224.0.8`; both internal load balancers |
+| Browser verification | Store Front returned HTTP 200 through Bastion plus `kubectl port-forward` |
+| Public exposure | No public AKS API or workload ingress; one managed AKS outbound IP and the Bastion public IP remain by design |
+| Resource Health API | Not verified because the current user lacks `Microsoft.ResourceHealth/availabilityStatuses/read`; control-plane and Kubernetes health checks passed |
+
+### Live Role Verification
+
+- `id-aks-sre-agent-demo` has Network Contributor on `snet-aks-nodes` and
+  `snet-aks-api-server`, plus Contributor on the AKS managed resource group.
+- `id-sre-agent-aks-demo` retains AKS Cluster Admin and AKS Contributor access
+  covering the recreated cluster.
+- Status: Pass.
+
 ---
 
 ## Current Change: Bicep-managed VNet-integrated SRE Agent
