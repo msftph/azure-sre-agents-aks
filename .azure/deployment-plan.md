@@ -156,22 +156,22 @@ Deployment completed on 2026-10-07 in `swedencentral`.
 | AKS provisioning | `Succeeded`, power state `Running`, Kubernetes `1.35.8` |
 | Private control plane | Private cluster enabled; public FQDN absent |
 | API Server VNet Integration | Enabled on `snet-aks-api-server` |
-| AKS nodes | Three nodes Ready with private `10.224.0.x` addresses and no node public IPs |
+| AKS nodes | Three nodes Ready with private addresses and no node public IPs |
 | Network stack | Azure CNI Overlay and Cilium; Cilium DaemonSet 3/3 Ready |
 | Bastion | Standard SKU, native tunneling enabled, provisioning `Succeeded` |
 | Bastion connectivity | `kubectl cluster-info` and Kubernetes API calls succeeded through local port `50001` |
 | VNet peering | Both management-to-AKS and AKS-to-management peerings `Connected` |
-| Private DNS | AKS and management VNets linked; API record resolves to `10.224.16.4` |
+| Private DNS | AKS and management VNets linked; API record resolves privately |
 | SRE Agent | Provisioning `Succeeded`, `AzureVNet` egress, private DNS resolution enabled |
 | AKS identity RBAC | Network Contributor present on node and API server subnets |
 | SRE Agent RBAC | AKS Cluster Admin and AKS Contributor access present at resource-group scope |
 | Container Insights | Enabled and connected to `law-sre-agent-aks-demo` |
 | Control-plane diagnostics | `aks-sre-agent-logs` enabled for the required AKS categories |
 | Demo workload | All nine pets namespace pods Running and Ready |
-| Workload ingress | Store Front `10.224.0.7`; Store Admin `10.224.0.8`; both internal load balancers |
+| Workload ingress | Store Front and Store Admin use internal load balancers |
 | Browser verification | Store Front returned HTTP 200 through Bastion plus `kubectl port-forward` |
 | Public exposure | No public AKS API or workload ingress; one managed AKS outbound IP and the Bastion public IP remain by design |
-| Resource Health API | Not verified because the current user lacks `Microsoft.ResourceHealth/availabilityStatuses/read`; control-plane and Kubernetes health checks passed |
+| Resource Health API | Verified `Available`; control-plane and Kubernetes health checks passed |
 
 ### Live Role Verification
 
@@ -198,8 +198,8 @@ PowerShell/Azure CLI workflow that creates AKS and deploys the demo workload.
 | Classification | POC / demo |
 | Scale | Small |
 | Budget | Cost-optimized |
-| Subscription | `ME-MngEnvMCAP335410-pahuber-1` (`ab021129-9bf3-4ee3-bbc6-3da839fb88a1`) |
-| Tenant | `5cd15b26-2657-4947-96ac-a22a1b5ce635` |
+| Subscription | `<subscription-name>` (`<subscription-id>`) |
+| Tenant | `<tenant-id>` |
 | Location | Sweden Central (`swedencentral`) |
 | Resource group | `rg-sre-aks` |
 | AKS cluster | `aks-sre-agent-demo` |
@@ -363,7 +363,7 @@ The Azure quota CLI was used first after registering `Microsoft.Quota`.
 
 **Path:** Modify an existing project only where required for current Azure CLI and subscription compatibility.
 
-**Workspace:** `C:\Users\pahuber\source\github.com\hailugebru\azure-sre-agents-aks`
+**Workspace:** Repository root
 
 ---
 
@@ -374,8 +374,8 @@ The Azure quota CLI was used first after registering `Microsoft.Quota`.
 | Classification | POC |
 | Scale | Small |
 | Budget | Cost-Optimized |
-| Subscription | ME-MngEnvMCAP335410-pahuber-1 (`ab021129-9bf3-4ee3-bbc6-3da839fb88a1`) |
-| Tenant | `5cd15b26-2657-4947-96ac-a22a1b5ce635` |
+| Subscription | `<subscription-name>` (`<subscription-id>`) |
+| Tenant | `<tenant-id>` |
 | Location | Sweden Central (`swedencentral`) |
 | Resource group | `rg-sre-aks` |
 | AKS cluster | `aks-sre-agent-demo` |
