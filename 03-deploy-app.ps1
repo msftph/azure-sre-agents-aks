@@ -16,7 +16,10 @@ kubectl wait --for=condition=Ready pod --all -n pets --timeout=300s
 # Check deployment status
 kubectl get all -n pets
 
-# Print the store URL
+# Print the internal service address and local access command
 $storeIp = kubectl get svc store-front -n pets -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 Write-Host ""
-Write-Host "Pet Store URL: http://$storeIp" -ForegroundColor Cyan
+Write-Host "Internal Store Front address: http://$storeIp" -ForegroundColor Cyan
+Write-Host "To open it from this Bastion shell, run:" -ForegroundColor Cyan
+Write-Host "  kubectl port-forward -n pets service/store-front 8080:80" -ForegroundColor White
+Write-Host "Then browse to http://localhost:8080 on this workstation." -ForegroundColor Cyan

@@ -1,22 +1,7 @@
 targetScope = 'resourceGroup'
 
-@description('Azure region for the SRE Agent resources.')
+@description('Azure region for private AKS networking and Azure Bastion.')
 param location string = resourceGroup().location
-
-@description('Name of the existing AKS cluster the SRE Agent manages.')
-param aksClusterName string
-
-@description('Name of the Azure SRE Agent resource.')
-param sreAgentName string = 'sre-agent-aks-demo'
-
-@description('Name of the user-assigned managed identity used by the SRE Agent.')
-param managedIdentityName string = 'id-sre-agent-aks-demo'
-
-@description('Name of the Log Analytics workspace used by the SRE Agent.')
-param logAnalyticsWorkspaceName string = 'law-sre-agent-aks-demo'
-
-@description('Name of the Application Insights component used by the SRE Agent.')
-param applicationInsightsName string = 'appi-sre-agent-aks-demo'
 
 @description('Name of the management virtual network used by SRE Agent and Bastion.')
 param managementVirtualNetworkName string = 'vnet-sre-agent-aks-demo'
@@ -24,13 +9,13 @@ param managementVirtualNetworkName string = 'vnet-sre-agent-aks-demo'
 @description('Address space for the management virtual network.')
 param managementVirtualNetworkAddressPrefix string = '10.250.0.0/24'
 
-@description('Name of the delegated SRE Agent subnet.')
+@description('Name of the subnet delegated to Azure SRE Agent.')
 param agentSubnetName string = 'snet-sre-agent'
 
-@description('Address prefix for the delegated SRE Agent subnet. Azure SRE Agent requires at least a /27.')
+@description('Address prefix for the delegated SRE Agent subnet.')
 param agentSubnetAddressPrefix string = '10.250.0.0/27'
 
-@description('Address prefix for AzureBastionSubnet. Azure Bastion requires at least a /26.')
+@description('Address prefix for AzureBastionSubnet.')
 param bastionSubnetAddressPrefix string = '10.250.0.64/26'
 
 @description('Name of the customer-managed AKS virtual network.')
@@ -57,7 +42,7 @@ param aksIdentityName string = 'id-aks-sre-agent-demo'
 @description('Name of the Azure Bastion resource.')
 param bastionName string = 'bas-sre-agent-aks-demo'
 
-@description('Name of the Standard public IP address used by Azure Bastion.')
+@description('Name of the Azure Bastion public IP address.')
 param bastionPublicIpName string = 'pip-bas-sre-agent-aks-demo'
 
 @minValue(2)
@@ -65,11 +50,8 @@ param bastionPublicIpName string = 'pip-bas-sre-agent-aks-demo'
 @description('Number of Azure Bastion scale units.')
 param bastionScaleUnits int = 2
 
-@description('Create the role assignments required by the demo. Set false when equivalent assignments already exist.')
-param deployRoleAssignments bool = true
-
 module network './modules/network.bicep' = {
-  name: 'sre-agent-network'
+  name: 'private-aks-network'
   params: {
     location: location
     managementVirtualNetworkName: managementVirtualNetworkName
@@ -87,7 +69,7 @@ module network './modules/network.bicep' = {
 }
 
 module aksIdentity './modules/aks-identity.bicep' = {
-  name: 'aks-identity'
+  name: 'private-aks-identity'
   params: {
     location: location
     aksIdentityName: aksIdentityName
@@ -101,7 +83,7 @@ module aksIdentity './modules/aks-identity.bicep' = {
 }
 
 module bastion './modules/bastion.bicep' = {
-  name: 'aks-bastion'
+  name: 'private-aks-bastion'
   params: {
     location: location
     bastionName: bastionName
@@ -111,33 +93,6 @@ module bastion './modules/bastion.bicep' = {
   }
 }
 
-module monitoring './modules/monitoring.bicep' = {
-  name: 'sre-agent-monitoring'
-  params: {
-    location: location
-    logAnalyticsWorkspaceName: logAnalyticsWorkspaceName
-    applicationInsightsName: applicationInsightsName
-  }
-}
-
-module sreAgent './modules/sre-agent.bicep' = {
-  name: 'sre-agent'
-  params: {
-    location: location
-    sreAgentName: sreAgentName
-    managedIdentityName: managedIdentityName
-    aksClusterName: aksClusterName
-    agentSubnetId: network.outputs.agentSubnetId
-    logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
-    applicationInsightsId: monitoring.outputs.applicationInsightsId
-    applicationInsightsAppId: monitoring.outputs.applicationInsightsAppId
-    deployRoleAssignments: deployRoleAssignments
-  }
-}
-
-output agentId string = sreAgent.outputs.agentId
-output agentEndpoint string = sreAgent.outputs.agentEndpoint
-output managedIdentityId string = sreAgent.outputs.managedIdentityId
 output managementVirtualNetworkId string = network.outputs.managementVirtualNetworkId
 output aksVirtualNetworkId string = network.outputs.aksVirtualNetworkId
 output agentSubnetId string = network.outputs.agentSubnetId
@@ -145,5 +100,3 @@ output aksNodeSubnetId string = network.outputs.aksNodeSubnetId
 output aksApiServerSubnetId string = network.outputs.aksApiServerSubnetId
 output aksIdentityId string = aksIdentity.outputs.aksIdentityId
 output bastionId string = bastion.outputs.bastionId
-output logAnalyticsWorkspaceId string = monitoring.outputs.logAnalyticsWorkspaceId
-output applicationInsightsId string = monitoring.outputs.applicationInsightsId

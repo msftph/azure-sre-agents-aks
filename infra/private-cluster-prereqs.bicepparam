@@ -1,11 +1,6 @@
-using './main.bicep'
+using './private-cluster-prereqs.bicep'
 
 param location = 'swedencentral'
-param aksClusterName = 'Azure-SRE-Agent-Demo-Cluster'
-param sreAgentName = 'sre-agent-aks-demo'
-param managedIdentityName = 'id-sre-agent-aks-demo'
-param logAnalyticsWorkspaceName = 'law-sre-agent-aks-demo'
-param applicationInsightsName = 'appi-sre-agent-aks-demo'
 param managementVirtualNetworkName = 'vnet-sre-agent-aks-demo'
 param managementVirtualNetworkAddressPrefix = '10.250.0.0/24'
 param agentSubnetName = 'snet-sre-agent'
@@ -23,5 +18,3 @@ param aksIdentityName = 'id-aks-sre-agent-demo'
 param bastionName = 'bas-sre-agent-aks-demo'
 param bastionPublicIpName = 'pip-bas-sre-agent-aks-demo'
 param bastionScaleUnits = 2
-
-param deployRoleAssignments = true

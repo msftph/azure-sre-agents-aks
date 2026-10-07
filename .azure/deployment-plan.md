@@ -2,7 +2,133 @@
 
 > **Status:** Validated
 
-Updated: 2026-10-06
+Updated: 2026-10-07
+
+---
+
+## Current Change: Private AKS Access Through Azure Bastion
+
+### Objective
+
+Extend the existing Bicep deployment so a private AKS control plane can be
+reached from a Windows workstation through Azure Bastion native client
+tunneling. Preserve the existing SRE Agent VNet integration and avoid changing
+the live AKS cluster as part of template validation.
+
+### Approved Architecture
+
+| Component | Planned configuration |
+|-----------|-----------------------|
+| Management VNet | Reuse `vnet-sre-agent-aks-demo` (`10.250.0.0/24`) |
+| SRE Agent subnet | Preserve `snet-sre-agent` (`10.250.0.0/27`) |
+| Bastion subnet | Add `AzureBastionSubnet` (`10.250.0.64/26`) |
+| Bastion | Standard SKU with native client support enabled |
+| Bastion public IP | Static Standard IPv4 address |
+| AKS connectivity | Optional peering to a customer-managed AKS VNet |
+| AKS API | Target state is private with its public FQDN disabled |
+| Workstation access | `az aks bastion` tunnel; no P2S VPN or workstation VNet route |
+| Windows tooling | PowerShell helper creates a temporary kubeconfig and restores local state on exit |
+| Workload ingress | Document conversion of public LoadBalancer services to internal load balancers |
+
+### Scope and Safety
+
+- Generate and validate Bicep for Bastion, its public IP, the required subnet,
+  and optional VNet peering.
+- Add a Windows PowerShell helper for the Bastion-native AKS tunnel.
+- Update documentation with prerequisites, RBAC, connection steps, and tunnel
+  lifecycle.
+- Keep Bastion and peering deployment opt-in so the existing validated SRE
+  Agent deployment remains backward compatible.
+- Do not deploy resources or mutate the live AKS cluster in this change.
+- Do not model the existing AKS cluster as a complete Bicep-managed resource;
+  doing so could overwrite settings that are currently owned by the original
+  PowerShell/CLI workflow.
+- Treat private-cluster conversion or recreation as a separately approved,
+  disruptive deployment because enabling API Server VNet Integration is
+  one-way and can restart workloads.
+
+### Files to Add or Modify
+
+| File | Purpose |
+|------|---------|
+| `infra/main.bicep` | Orchestrate optional Bastion and VNet peering |
+| `infra/main.bicepparam` | Provide Bastion defaults while leaving deployment opt-in |
+| `infra/modules/network.bicep` | Add the dedicated `AzureBastionSubnet` |
+| `infra/modules/bastion.bicep` | Deploy Bastion Standard and its public IP |
+| `infra/modules/vnet-peering.bicep` | Peer the management and customer-managed AKS VNets |
+| `Connect-AksViaBastion.ps1` | Establish a native tunnel using a temporary kubeconfig |
+| `README.md` | Document private-AKS prerequisites and Windows usage |
+| `.azure/deployment-plan.md` | Record preparation and validation evidence |
+
+### Validation
+
+- Build and lint every Bicep file.
+- Run ARM validation with Bastion and peering disabled.
+- Run targeted ARM validation/what-if for the Bastion resources.
+- Verify the default deployment remains non-destructive.
+- Run PowerShell parser validation for the connection helper.
+- Confirm no secret values or generated kubeconfig files are committed.
+- Set this plan to `Ready for Validation` and invoke `azure-validate`.
+
+#### All validation checks pass
+
+- [x] Core Validation (CLI, auth, build, validate, what-if)
+- [x] Linting
+- [x] Azure Policy Validation
+
+### Execution Checklist
+
+- [x] User selected Azure Bastion native AKS tunneling
+- [x] User approved implementation
+- [x] Inspect existing Bicep, branch, and deployment plan
+- [x] Research current Bastion and Bicep schemas
+- [x] Generate Bastion, networking, peering, and helper artifacts
+- [x] Update documentation
+- [x] Set plan status to `Ready for Validation`
+- [x] Invoke `azure-validate`
+- [x] Commit and push the updated PR branch
+
+### Preparation Evidence
+
+| Check | Result |
+|-------|--------|
+| Bicep build | `main.bicep`, `private-cluster-prereqs.bicep`, and all modules compile |
+| Bicep lint | All Bicep files lint without diagnostics |
+| Parameter build | Both `.bicepparam` files compile |
+| ARM validation | Private-cluster prerequisites and the full SRE Agent template validate in `rg-sre-aks` |
+| ARM what-if | Succeeds; creates the two VNets, Bastion, public IP, identity, peerings, and subnet role assignments with no deletions |
+| PowerShell parser | Prerequisite, cluster creation, app deployment, and Bastion connection scripts parse successfully |
+| CLI compatibility | Azure CLI 2.89.1 and `az aks bastion tunnel` from `aks-preview` verified |
+| Live deployment | Not performed |
+
+### Current Role Assignment Verification
+
+- **Status:** Verified
+- **AKS identity:** `id-aks-sre-agent-demo`
+- **AKS node subnet:** Network Contributor, scoped only to `snet-aks-nodes`
+- **AKS API server subnet:** Network Contributor, scoped only to
+  `snet-aks-api-server`
+- **SRE Agent identities:** Existing demo-specific monitoring and AKS roles
+  remain unchanged and are documented as broader than a production baseline.
+- **Deployment identity:** Must be able to create role assignments and network
+  resources; no deployer privilege is embedded in the template.
+- **Issues:** None found in static review.
+
+### Section 7: Validation Proof
+
+| Check | Command or evidence | Result |
+|-------|---------------------|--------|
+| Authoritative core validation | `validate-deployment.ps1 -Scope group -ResourceGroup rg-sre-aks -Template .\infra\private-cluster-prereqs.bicep -Parameters .\infra\private-cluster-prereqs.bicepparam` | PASS; Create 10, Modify 0, Delete 0 |
+| Full template validation | `az deployment group validate` for `infra/main.bicep` with the live AKS name and role creation disabled | PASS |
+| Bicep compilation | `az bicep build` for every `.bicep` file | PASS |
+| Bicep linting | `az bicep lint` for every `.bicep` file | PASS with no diagnostics |
+| Parameter compilation | `az bicep build-params` for both `.bicepparam` files | PASS |
+| PowerShell parsing | PowerShell AST parser for all changed scripts | PASS |
+| Bastion CLI | Azure CLI 2.89.1 plus `az aks bastion tunnel --help` | PASS |
+| Azure Policy | Effective management-group and subscription assignments listed; ARM validation and what-if succeeded under the effective deny policies | PASS |
+| RBAC | Static review of AKS and SRE Agent role assignments | PASS |
+| Destructive changes | What-if deletion count | 0 |
+| Deployment | Not requested and not performed | N/A |
 
 ---
 

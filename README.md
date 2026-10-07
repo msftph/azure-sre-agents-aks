@@ -6,8 +6,10 @@ This folder contains PowerShell scripts to deploy an AKS cluster with **Node Aut
 
 - [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) installed
 - [kubectl](https://kubernetes.io/docs/tasks/tools/) installed
+- Azure CLI 2.85.0 or later for `az aks bastion tunnel`
 - An Azure subscription with permissions to create AKS clusters
-- Permission to create role assignments when deploying the Azure SRE Agent
+- Permission to create role assignments, virtual networks, public IP addresses,
+  and Azure Bastion
 - PowerShell 7+ (recommended)
 
 ## Before You Start
@@ -60,9 +62,10 @@ Loads shared environment variables (`$SUBSCRIPTION_ID`, `$RESOURCE_GROUP`, `$LOC
 ```
 
 - Sets the active Azure subscription
-- Registers the `NodeAutoProvisioningPreview` feature flag (waits until registered)
-- Refreshes the `Microsoft.ContainerService` provider
-- Installs/updates the `aks-preview` CLI extension
+- Verifies Azure CLI 2.85.0 or later
+- Registers the enterprise public-IP compatibility feature used by this subscription
+- Registers the Network, Managed Identity, and AKS providers
+- Installs the `aks-preview` extension that contains `az aks bastion`
 
 > **Note:** Feature registration can take 5-15 minutes.
 
@@ -75,14 +78,58 @@ Loads shared environment variables (`$SUBSCRIPTION_ID`, `$RESOURCE_GROUP`, `$LOC
 ```
 
 - Creates the resource group
+- Deploys the private-network prerequisites from
+  `infra/private-cluster-prereqs.bicep`:
+  - management VNet `10.250.0.0/24`
+  - SRE Agent delegated subnet `10.250.0.0/27`
+  - `AzureBastionSubnet` `10.250.0.64/26`
+  - customer-managed AKS VNet `10.224.0.0/16`
+  - node subnet `10.224.0.0/20`
+  - delegated API server subnet `10.224.16.0/28`
+  - bidirectional VNet peering
+  - AKS user-assigned identity and subnet permissions
+  - Azure Bastion Standard with native client tunneling enabled
 - Creates an AKS cluster with:
+  - a private API endpoint and no public FQDN
+  - API Server VNet Integration
   - **NAP enabled** (`--node-provisioning-mode Auto`)
   - Azure CNI Overlay networking
   - Cilium dataplane
   - **Managed Prometheus** (`--enable-azure-monitor-metrics`)
-- Downloads cluster credentials to your kubeconfig
+- Links the AKS-managed private DNS zone to the management VNet
+- Prints the command used to open a Bastion-backed Kubernetes shell
 
-> **Note:** Cluster creation takes ~5-10 minutes.
+> **Important:** This path is intended for a new cluster. It does not delete or
+> convert an existing public cluster. Cluster and Bastion provisioning can take
+> 10-20 minutes.
+
+### Step 2B — Connect to private AKS through Azure Bastion
+
+The tunnel command launches a subshell with a temporary kubeconfig that points
+at a local Bastion tunnel. No VPN client, jump-box VM, or workstation route to
+the AKS VNet is required.
+
+```powershell
+.\Connect-AksViaBastion.ps1
+```
+
+Inside the new shell:
+
+```powershell
+kubectl get nodes
+kubectl get pods -A
+```
+
+Type `exit` to close the subshell and tunnel. The helper defaults to local port
+`50001` and cluster-admin credentials. Both can be overridden:
+
+```powershell
+.\Connect-AksViaBastion.ps1 -Port 50002 -UseAdminCredentials $false
+```
+
+Required access includes Reader on the AKS cluster, Bastion, and relevant VNet,
+plus permission to retrieve the selected Kubernetes credentials. The
+cluster-admin option requires the Azure Kubernetes Service Cluster Admin Role.
 
 ---
 
@@ -90,7 +137,11 @@ Loads shared environment variables (`$SUBSCRIPTION_ID`, `$RESOURCE_GROUP`, `$LOC
 
 The Bicep deployment under `infra/` creates or incrementally updates:
 
-- a dedicated VNet and `/27` subnet delegated to `Microsoft.App/environments`
+- the management and AKS VNets created during Step 2
+- the SRE Agent delegated subnet and `AzureBastionSubnet`
+- the peering between the management and AKS VNets
+- the AKS identity and subnet role assignments
+- Azure Bastion Standard with native client tunneling enabled
 - the SRE Agent user-assigned managed identity
 - Log Analytics and Application Insights resources
 - the `Microsoft.App/agents` resource
@@ -139,10 +190,10 @@ az aks enable-addons `
   --workspace-resource-id $LAW_ID
 ```
 
-> **VNet scope:** This adds VNet integration for the SRE Agent sandbox. It does
-> not convert AKS to a private cluster, add private endpoints, or force egress
-> through Azure Firewall. The current public AKS API remains reachable while
-> the agent gains a delegated network placement for future private resources.
+> **VNet scope:** A fresh deployment created through Step 2 uses a private AKS
+> API with its public FQDN disabled. The template does not convert an existing
+> public cluster and does not remove AKS outbound internet access. Bastion keeps
+> a controlled public frontend so local clients can establish the tunnel.
 
 ---
 
@@ -154,8 +205,19 @@ az aks enable-addons `
 
 - Creates the `pets` namespace
 - Deploys the local manifests in `./manifests/aks-store` (MongoDB, RabbitMQ, order-service, product-service, makeline-service, store-front, store-admin, virtual-customer, virtual-worker)
+- Creates Store Front and Store Admin as internal Azure load balancers
 - Waits for all pods to be Ready
-- Prints the Store Front URL
+- Prints the private Store Front address and a local port-forward command
+
+Run this step inside the shell created by `Connect-AksViaBastion.ps1`. To open
+the Store Front in the local browser:
+
+```powershell
+kubectl port-forward -n pets service/store-front 8080:80
+```
+
+Then browse to [http://localhost:8080](http://localhost:8080). The port-forward
+travels through the same Bastion-backed Kubernetes API tunnel.
 
 ---
 
