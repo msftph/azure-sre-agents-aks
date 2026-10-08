@@ -155,6 +155,7 @@ az deployment group create `
   --resource-group $RESOURCE_GROUP `
   --template-file .\infra\main.bicep `
   --parameters .\infra\main.bicepparam `
+  location=$LOCATION `
   aksClusterName=$CLUSTER_NAME
 ```
 
@@ -171,6 +172,7 @@ az deployment group create `
   --resource-group $RESOURCE_GROUP `
   --template-file .\infra\main.bicep `
   --parameters .\infra\main.bicepparam `
+  location=$LOCATION `
   aksClusterName=$CLUSTER_NAME `
   deployRoleAssignments=false
 ```

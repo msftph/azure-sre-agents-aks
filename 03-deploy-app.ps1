@@ -66,8 +66,18 @@ if (
     throw "The internal load balancers did not receive addresses within 5 minutes."
 }
 
-if (-not $storeIp.StartsWith("10.224.") -or -not $adminIp.StartsWith("10.224.")) {
-    throw "Expected private load balancer addresses in 10.224.0.0/16, received Store Front '$storeIp' and Store Admin '$adminIp'."
+$storeInternal = kubectl get svc store-front -n pets -o jsonpath='{.metadata.annotations.service\.beta\.kubernetes\.io/azure-load-balancer-internal}'
+if ($LASTEXITCODE -ne 0) {
+    throw "Reading the Store Front internal load balancer annotation failed with exit code $LASTEXITCODE."
+}
+
+$adminInternal = kubectl get svc store-admin -n pets -o jsonpath='{.metadata.annotations.service\.beta\.kubernetes\.io/azure-load-balancer-internal}'
+if ($LASTEXITCODE -ne 0) {
+    throw "Reading the Store Admin internal load balancer annotation failed with exit code $LASTEXITCODE."
+}
+
+if ($storeInternal -ne "true" -or $adminInternal -ne "true") {
+    throw "Expected internal load balancer annotations on both services, received Store Front '$storeInternal' and Store Admin '$adminInternal'."
 }
 
 Write-Host ""

@@ -11,7 +11,14 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 kubectl wait --for=condition=Available deployment --all -n cilium-policy-demo --timeout=300s
+if ($LASTEXITCODE -ne 0) {
+    throw "Waiting for deployments in 'cilium-policy-demo' to become available failed with exit code $LASTEXITCODE."
+}
+
 kubectl wait --for=condition=Available deployment --all -n cilium-policy-observer --timeout=300s
+if ($LASTEXITCODE -ne 0) {
+    throw "Waiting for deployments in 'cilium-policy-observer' to become available failed with exit code $LASTEXITCODE."
+}
 
 $networkLogCrd = kubectl get crd containernetworklogs.acn.azure.com --ignore-not-found -o name
 if ($networkLogCrd) {

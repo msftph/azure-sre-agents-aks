@@ -8,11 +8,8 @@ spec:
       from:
         labelSelector:
           matchExpressions:
-            - key: k8s:io.kubernetes.pod.namespace
-              operator: In
-              values:
-                - cilium-policy-demo
-                - cilium-policy-observer
+            - key: scenario
+              operator: Exists
       protocol:
         - tcp
       verdict:
