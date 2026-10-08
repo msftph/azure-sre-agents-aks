@@ -54,6 +54,7 @@ az aks create `
   --pod-cidr 10.244.0.0/16 `
   --service-cidr 10.0.0.0/16 `
   --dns-service-ip 10.0.0.10 `
+  --enable-acns `
   --enable-azure-monitor-metrics `
   --generate-ssh-keys
 Assert-AzCliSucceeded "Creating private AKS cluster '$CLUSTER_NAME'"

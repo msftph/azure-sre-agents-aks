@@ -1,0 +1,20 @@
+apiVersion: acn.azure.com/v1alpha1
+kind: ContainerNetworkLog
+metadata:
+  name: cilium-policy-demo
+spec:
+  includefilters:
+    - name: cilium-policy-demo-traffic
+      from:
+        labelSelector:
+          matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: In
+              values:
+                - cilium-policy-demo
+                - cilium-policy-observer
+      protocol:
+        - tcp
+      verdict:
+        - forwarded
+        - dropped

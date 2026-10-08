@@ -1,6 +1,6 @@
 # AKS NAP (Node Auto-Provisioning) Demo — PowerShell Scripts
 
-This folder contains PowerShell scripts to deploy an AKS cluster with **Node Auto-Provisioning (NAP/Karpenter)**, run the [AKS Store Demo](https://github.com/Azure-Samples/aks-store-demo) application, and reproduce the two incident flows used in the blog post: **CPU starvation** and **OOMKilled** troubleshooting with Azure SRE Agent.
+This folder contains PowerShell scripts to deploy an AKS cluster with **Node Auto-Provisioning (NAP/Karpenter)**, run the [AKS Store Demo](https://github.com/Azure-Samples/aks-store-demo) application, and reproduce the two incident flows used in the blog post: **CPU starvation** and **OOMKilled** troubleshooting with Azure SRE Agent. It also includes a standalone [Cilium network policy misconfiguration scenario](./scenarios/cilium-network-policy/README.md).
 
 ## Prerequisites
 
@@ -95,6 +95,7 @@ Loads shared environment variables (`$SUBSCRIPTION_ID`, `$RESOURCE_GROUP`, `$LOC
   - **NAP enabled** (`--node-provisioning-mode Auto`)
   - Azure CNI Overlay networking
   - Cilium dataplane
+  - **Advanced Container Networking Services (ACNS)** for Cilium/Hubble network observability
   - **Managed Prometheus** (`--enable-azure-monitor-metrics`)
 - Links the AKS-managed private DNS zone to the management VNet
 - Prints the command used to open a Bastion-backed Kubernetes shell
@@ -641,6 +642,18 @@ If you assign that issue to GitHub Copilot agent, the workflow can continue into
 
 ---
 
+## Standalone Scenario — Cilium Network Policy Misconfigurations
+
+The [`scenarios/cilium-network-policy`](./scenarios/cilium-network-policy/README.md) lab reproduces three Cilium-specific connectivity failures without any third-party monitoring dependency:
+
+- cross-namespace selectors that omit the namespace label
+- CIDR rules that are incorrectly expected to match Cilium-managed pods
+- unsupported `toServices` and `toPorts` combinations
+
+The scenario uses AKS Advanced Container Networking Services, Hubble, Azure Monitor managed Prometheus, and optional Container Insights flow logs for diagnostics. It is independent of the AKS Store application and can be set up, broken, fixed, and removed with the PowerShell scripts in the scenario folder.
+
+---
+
 ## Try It Yourself
 
 If you are coming from the blog post, this README is the full setup appendix.
@@ -675,6 +688,8 @@ This README contains the complete AKS deployment steps, connector configuration,
 | AKS Store Demo | [github.com/Azure-Samples/aks-store-demo](https://github.com/Azure-Samples/aks-store-demo) |
 | Node Auto-Provisioning | [learn.microsoft.com/azure/aks/node-autoprovision](https://learn.microsoft.com/azure/aks/node-autoprovision) |
 | KEDA on AKS | [learn.microsoft.com/azure/aks/keda-about](https://learn.microsoft.com/azure/aks/keda-about) |
+| Azure CNI powered by Cilium | [learn.microsoft.com/azure/aks/azure-cni-powered-by-cilium](https://learn.microsoft.com/azure/aks/azure-cni-powered-by-cilium) |
+| Container Network Observability | [learn.microsoft.com/azure/aks/container-network-observability-how-to](https://learn.microsoft.com/azure/aks/container-network-observability-how-to) |
 
 ---
 
@@ -702,6 +717,8 @@ nap/
 │   ├── 07-setup-keda-scaler.ps1
 │   ├── 08-setup-github-issues.ps1
 │   ├── README.md
+│   ├── scenarios/
+│   │   └── cilium-network-policy/
 │   └── manifests/
 │       ├── aks-store/
 │       │   ├── 00-mongodb.yaml
