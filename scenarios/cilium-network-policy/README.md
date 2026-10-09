@@ -26,14 +26,20 @@ The source article's Cluster Mesh identity case is not automated here because th
 - `kubectl` access to the cluster
 - Cilium `CiliumNetworkPolicy` CRDs installed by AKS
 - PowerShell 7+
+- Kubernetes 1.33+ for optional ACNS container network logs
 
-The repository's `02-create-cluster.ps1` enables Cilium, ACNS, and Azure Monitor managed Prometheus. For an existing cluster:
+The repository's `Deploy-Demo.ps1` deploys Cilium, ACNS, and Azure Monitor
+managed Prometheus through Bicep. Create the demo cluster using the root
+[setup instructions](../../README.md#step-2--deploy-the-complete-azure-infrastructure), then open its
+private API tunnel before running this scenario:
 
 ```powershell
-. ..\..\00-variables.ps1
-az aks update -g $RESOURCE_GROUP -n $CLUSTER_NAME --enable-acns --enable-azure-monitor-metrics
-az aks get-credentials -g $RESOURCE_GROUP -n $CLUSTER_NAME
+..\..\Connect-AksViaBastion.ps1
 ```
+
+For an unrelated existing cluster, configure ACNS and monitoring in that
+cluster's owning infrastructure template; do not apply this repository's
+complete private-cluster template to it as an add-on-only update.
 
 ## Run the scenario
 
@@ -90,15 +96,25 @@ sum by (reason, direction) (
 )
 ```
 
-For workload-level analysis, use the Azure Managed Grafana dashboards under **Azure Managed Prometheus > Kubernetes > Networking**, especially **Drops (Workload)** and **Pod Flows (Namespace)**.
+For workload-level analysis, query the Azure Monitor workspace output by the
+private-cluster deployment. If you separately configure Azure Managed Grafana,
+its **Azure Managed Prometheus > Kubernetes >
+Networking** dashboards can also show **Drops (Workload)** and **Pod Flows
+(Namespace)**. Step 2 deploys Azure Monitor's recommended recording-rule groups;
+Grafana itself is not deployed by this repository.
 
-The included `manifests/observability.yaml` creates a `ContainerNetworkLog` filter when the ACNS logging CRD is available. To persist those flows in Azure Monitor, enable Container Insights and container network log forwarding:
+The included `manifests/observability.yaml` creates a `ContainerNetworkLog` filter
+when the ACNS logging CRD is available. To persist those flows in Azure Monitor,
+run Step 2 from the repository root with the network-log option before connecting:
 
 ```powershell
-. ..\..\00-variables.ps1
-az aks enable-addons -a monitoring -g $RESOURCE_GROUP -n $CLUSTER_NAME
-az aks update --enable-acns --enable-container-network-logs -g $RESOURCE_GROUP -n $CLUSTER_NAME
+.\Deploy-Demo.ps1 -EnableContainerNetworkLogs
 ```
+
+This sets Bicep's `enableContainerNetworkLogs=true`, configures the monitoring
+add-on, and deploys the high-scale collection endpoint/rule, including the
+`Microsoft-ContainerNetworkLogs` stream. On repeat deployments use the same
+option and SSH key; review a what-if first as described in the root README.
 
 Then query denied flows in the cluster's Log Analytics workspace:
 

@@ -1,6 +1,6 @@
-# AKS NAP (Node Auto-Provisioning) Demo — PowerShell Scripts
+# AKS NAP (Node Auto-Provisioning) Demo — Bicep Deployment
 
-This folder contains PowerShell scripts to deploy an AKS cluster with **Node Auto-Provisioning (NAP/Karpenter)**, run the [AKS Store Demo](https://github.com/Azure-Samples/aks-store-demo) application, and reproduce the two incident flows used in the blog post: **CPU starvation** and **OOMKilled** troubleshooting with Azure SRE Agent. It also includes a standalone [Cilium network policy misconfiguration scenario](./scenarios/cilium-network-policy/README.md).
+This repository deploys private AKS with **Node Auto-Provisioning (NAP/Karpenter)** and Azure SRE Agent through a consolidated Bicep entry point. PowerShell handles prerequisite registration, discovery, and Kubernetes operations to run the [AKS Store Demo](https://github.com/Azure-Samples/aks-store-demo) and reproduce **CPU starvation** and **OOMKilled** incidents. It also includes a standalone [Cilium network policy misconfiguration scenario](./scenarios/cilium-network-policy/README.md).
 
 ## Prerequisites
 
@@ -10,6 +10,10 @@ This folder contains PowerShell scripts to deploy an AKS cluster with **Node Aut
 - An Azure subscription with permissions to create AKS clusters
 - Permission to create role assignments, virtual networks, public IP addresses,
   and Azure Bastion
+- Permission to run subscription-scope deployments, create resource groups,
+  and register subscription features/providers
+- Bicep CLI available to Azure CLI (`az bicep install` if needed)
+- OpenSSH `ssh-keygen` available to generate a local node SSH key if one does not exist
 - PowerShell 7+ (recommended)
 
 ## Before You Start
@@ -37,11 +41,42 @@ cd azure-sre-agents-aks
 notepad 00-variables.ps1
 ```
 
-That is enough to get the environment variables in place and continue with the full setup steps below.
+After editing the variables and running `az login`, deploy all Azure infrastructure:
+
+```powershell
+.\Deploy-Demo.ps1
+```
+
+No ordered sequence of provisioning scripts or separate agent deployment is
+required. The launcher automatically handles prerequisites, submits
+`infra/main.bicep` with `infra/main.bicepparam`, and completes the discovered DNS
+link and recommended recording rules using Bicep.
+
+`infra/main.bicep` is a subscription-scope entry point:
+
+```text
+main.bicep
+├── resource group
+├── private-cluster-prereqs.bicep
+│   ├── networking, peering, identity and subnet permissions
+│   ├── Bastion
+│   ├── shared monitoring resources
+│   ├── private AKS, NAP, system taint and KEDA
+│   └── AKS telemetry collection resources
+└── sre-agent.bicep (after the private-cluster module)
+    └── agent, identities, connectors and RBAC
+```
+
+Bicep dependencies order resource deployment; the modules are not separate
+commands to run. After deployment, connect with `.\Connect-AksViaBastion.ps1`.
+Inside that shell, the scripts from Step 3 onward are optional Kubernetes
+workload/scenario operations, not required Azure infrastructure provisioning.
 
 ## Step-by-Step Instructions
 
-Run each script **in order** from this folder. Each step depends on the previous one.
+The numbered sections below explain the setup and demo operations. Steps 0, 1,
+2, and 2A are covered by `Deploy-Demo.ps1`; do not run them as a required sequence.
+Workload deployment and incident exercises still require Kubernetes connectivity.
 
 ---
 
@@ -51,11 +86,13 @@ Run each script **in order** from this folder. Each step depends on the previous
 . .\00-variables.ps1
 ```
 
-Loads shared environment variables (`$SUBSCRIPTION_ID`, `$RESOURCE_GROUP`, `$LOCATION`, `$CLUSTER_NAME`) into your session. **Dot-source this first** — other scripts do it automatically.
+Loads shared environment variables (`$SUBSCRIPTION_ID`, `$RESOURCE_GROUP`, `$LOCATION`, `$CLUSTER_NAME`) into your session for manual commands. The launcher and other scripts do this automatically.
 
 ---
 
 ### Step 1 — Prerequisites
+
+Automatically run by `Deploy-Demo.ps1`. The helper can also be run independently:
 
 ```powershell
 .\01-prerequisites.ps1
@@ -63,23 +100,25 @@ Loads shared environment variables (`$SUBSCRIPTION_ID`, `$RESOURCE_GROUP`, `$LOC
 
 - Sets the active Azure subscription
 - Verifies Azure CLI 2.85.0 or later
-- Registers the enterprise public-IP compatibility feature used by this subscription
-- Registers the Network, Managed Identity, and AKS providers
+- Deploys the enterprise public-IP compatibility feature registration with
+  `infra/subscription-prerequisites.bicep` and waits for registration
+- Registers the Network, Managed Identity, AKS, Operational Insights, Insights,
+  Monitor, Alerts Management, and App providers
 - Installs the `aks-preview` extension that contains `az aks bastion`
 
 > **Note:** Feature registration can take 5-15 minutes.
 
 ---
 
-### Step 2 — Create AKS Cluster
+### Step 2 — Deploy the Complete Azure Infrastructure
 
 ```powershell
-.\02-create-cluster.ps1
+.\Deploy-Demo.ps1
 ```
 
-- Creates the resource group
-- Deploys the private-network prerequisites from
-  `infra/private-cluster-prereqs.bicep`:
+- Deploys the resource group, private AKS infrastructure, and SRE Agent in one
+  subscription-scope `infra/main.bicep` deployment
+- Uses `infra/private-cluster-prereqs.bicep` as an internal module for:
   - management VNet `10.250.0.0/24`
   - SRE Agent delegated subnet `10.250.0.0/27`
   - `AzureBastionSubnet` `10.250.0.64/26`
@@ -89,15 +128,24 @@ Loads shared environment variables (`$SUBSCRIPTION_ID`, `$RESOURCE_GROUP`, `$LOC
   - bidirectional VNet peering
   - AKS user-assigned identity and subnet permissions
   - Azure Bastion Standard with native client tunneling enabled
-- Creates an AKS cluster with:
+- Deploys the AKS cluster through `infra/modules/aks-cluster.bicep` with:
   - a private API endpoint and no public FQDN
   - API Server VNet Integration
-  - **NAP enabled** (`--node-provisioning-mode Auto`)
+  - **NAP enabled** (`nodeProvisioningProfile.mode = Auto`)
   - Azure CNI Overlay networking
   - Cilium dataplane
   - **Advanced Container Networking Services (ACNS)** for Cilium/Hubble network observability
-  - **Managed Prometheus** (`--enable-azure-monitor-metrics`)
-- Links the AKS-managed private DNS zone to the management VNet
+  - **Managed Prometheus**, with an Azure Monitor workspace, collection endpoint,
+    data collection rule, cluster association, and recommended recording-rule
+    groups (Windows groups disabled for this Linux cluster)
+  - **Container Insights**, with the shared Log Analytics workspace and its
+    data collection rule/association
+  - **KEDA enabled**
+  - three `Standard_D4s_v5` Ubuntu system nodes, tainted
+    `CriticalAddonsOnly=true:NoExecute` so app pods use NAP-provisioned nodes
+- Discovers the AKS-managed private DNS zone, then deploys its management-VNet
+  link using `infra/modules/private-dns-link.bicep` in the node resource group
+- Deploys the SRE Agent, its identities, connectors, and demo RBAC automatically
 - Prints the command used to open a Bastion-backed Kubernetes shell
 
 > **Important:** This path is intended for a new cluster. It does not delete or
@@ -110,6 +158,36 @@ Loads shared environment variables (`$SUBSCRIPTION_ID`, `$RESOURCE_GROUP`, `$LOC
 > brings all four NSGs into Bicep as existing resources and preserves their
 > subnet associations. A partial set is treated as an error rather than risking
 > an NSG detach.
+
+The script reuses `~/.ssh/id_rsa.pub` or generates a local RSA key pair outside
+the repository. Override the public-key path with
+`.\Deploy-Demo.ps1 -SshPublicKeyPath "$HOME/.ssh/aks-demo.pub"`.
+Only the public key is passed to Bicep; do not put private keys in parameter files.
+
+`infra/main.bicepparam` controls all infrastructure settings, including the
+system node size/count, agent configuration, and shared telemetry resource names.
+There is no separate private-cluster parameter file to keep in sync.
+The script supplies the SSH public key via the temporary `AKS_SSH_PUBLIC_KEY`
+environment variable and overrides the location, cluster name, NSG association
+flag, and network-log option. For a direct Bicep deployment or parameter build,
+set `$env:AKS_SSH_PUBLIC_KEY = (Get-Content -Raw "$HOME/.ssh/id_rsa.pub").Trim()` first.
+
+To opt into ACNS flow-log forwarding and high-scale Container Insights ingestion:
+
+```powershell
+.\Deploy-Demo.ps1 -EnableContainerNetworkLogs
+```
+
+Repeat deployments reconcile the declared cluster configuration, including its
+system pool, taint, KEDA, and monitoring. Reuse the same key and network-log option
+on subsequent runs. Review a what-if before redeploying; this is not a generic
+import/update template for arbitrary existing clusters. No live cluster conversion
+or recreation is performed by this repository change. Telemetry workspaces and
+ACNS incur Azure charges. The script reads Azure Monitor's recording-rule
+recommendations and deploys them through
+`infra/modules/prometheus-recording-rules.bicep`; recommended alert rules are
+excluded. Grafana itself and dashboard configuration remain optional and are
+not deployed by this repository.
 
 ### Step 2B — Connect to private AKS through Azure Bastion
 
@@ -143,67 +221,31 @@ cluster-admin option requires the Azure Kubernetes Service Cluster Admin Role.
 
 ### Step 2A — Deploy the VNet-integrated Azure SRE Agent
 
-The Bicep deployment under `infra/` creates or incrementally updates:
-
-- the management and AKS VNets created during Step 2
-- the SRE Agent delegated subnet and `AzureBastionSubnet`
-- the peering between the management and AKS VNets
-- the AKS identity and subnet role assignments
-- Azure Bastion Standard with native client tunneling enabled
-- the SRE Agent user-assigned managed identity
-- Log Analytics and Application Insights resources
-- the `Microsoft.App/agents` resource
-- Azure Monitor, Log Analytics, and Application Insights connectors
-- the monitoring and AKS role assignments required by this demo
-
-```powershell
-az deployment group create `
-  --name sre-agent-infrastructure `
-  --resource-group $RESOURCE_GROUP `
-  --template-file .\infra\main.bicep `
-  --parameters .\infra\main.bicepparam `
-  location=$LOCATION `
-  aksClusterName=$CLUSTER_NAME
-```
+Already included in Step 2; no separate command is required. Bicep deploys the
+agent module after the private cluster and shared monitoring module complete.
+It creates the SRE Agent identities, `Microsoft.App/agents`, Azure Monitor,
+Log Analytics, and Application Insights connectors, and demo-specific RBAC.
 
 The template uses the stable demo resource names, so an incremental deployment
 updates an existing `sre-agent-aks-demo` environment rather than creating a
 second agent.
 
-The checked-in parameter file sets
-`associateExistingPolicyManagedNsgs=true` for repeat deployments in the
-policy-managed environment. Set it to `false` only for initial provisioning
-where none of the expected NSGs exist.
-
 If the target environment already has equivalent manually created role
 assignments, disable role creation to avoid `RoleAssignmentExists` conflicts:
 
 ```powershell
-az deployment group create `
-  --name sre-agent-infrastructure `
-  --resource-group $RESOURCE_GROUP `
-  --template-file .\infra\main.bicep `
-  --parameters .\infra\main.bicepparam `
-  location=$LOCATION `
-  aksClusterName=$CLUSTER_NAME `
-  deployRoleAssignments=false
+.\Deploy-Demo.ps1 -SkipRoleAssignments
 ```
 
-Connect AKS Container Insights to the workspace created by the deployment:
+This skips the SRE Agent role assignments, not the AKS subnet permissions.
+For direct deployment, set `deployRoleAssignments=false` in the single
+parameter file instead. `02-create-cluster.ps1` remains a compatibility wrapper
+for the full launcher; it now includes the agent rather than creating AKS alone.
 
-```powershell
-$LAW_ID = az deployment group show `
-  --resource-group $RESOURCE_GROUP `
-  --name sre-agent-infrastructure `
-  --query properties.outputs.logAnalyticsWorkspaceId.value `
-  --output tsv
-
-az aks enable-addons `
-  --resource-group $RESOURCE_GROUP `
-  --name $CLUSTER_NAME `
-  --addons monitoring `
-  --workspace-resource-id $LAW_ID
-```
+**Existing deployment commands must change:** `infra/main.bicep` was previously
+a resource-group-scope agent deployment. It is now subscription-scope and
+deploys the complete demo, including AKS. Use `az deployment sub`, not
+`az deployment group`, and review the entire configuration before redeploying.
 
 > **VNet scope:** A fresh deployment created through Step 2 uses a private AKS
 > API with its public FQDN disabled. The template does not convert an existing
@@ -236,15 +278,17 @@ travels through the same Bastion-backed Kubernetes API tunnel.
 
 ---
 
-### Step 4 — Enable NAP (Taint System Pool)
+### Step 4 — Verify NAP System-Pool Configuration
 
 ```powershell
 .\04-setup-nap.ps1
 ```
 
-- Discovers the default system nodepool
-- Applies `CriticalAddonsOnly=true:NoExecute` taint to the system pool
-- This evicts app pods → NAP/Karpenter provisions new user nodes automatically
+- Reads the system node pool and verifies its Bicep-managed
+  `CriticalAddonsOnly=true:NoExecute` taint
+- No Azure resource update is performed: the taint is deployed in Step 2
+- NAP/Karpenter provisions user nodes as soon as app pods are scheduled in Step 3,
+  rather than waiting for an imperative taint/eviction step
 
 **Monitor NAP activity:**
 ```powershell
@@ -298,6 +342,7 @@ kubectl describe nodepool default
 ```
 
 - Deploys a Secret, TriggerAuthentication, and ScaledObject for `virtual-worker`
+- Verifies the KEDA add-on already enabled by Step 2's Bicep deployment
 - KEDA scales virtual-worker replicas based on RabbitMQ queue length
 
 **Test scaling:**
@@ -672,7 +717,8 @@ The scenario uses AKS Advanced Container Networking Services, Hubble, Azure Moni
 
 If you are coming from the blog post, this README is the full setup appendix.
 
-1. Run Steps 0 through 7 to build the AKS environment.
+1. Run `.\Deploy-Demo.ps1` to deploy all Azure infrastructure. Connect through
+   Bastion, then use Steps 3 through 7 for the optional AKS Store and scaling demo.
 2. Complete Steps 8 through 10 to wire Azure SRE Agent, GitHub, and Teams.
 3. Complete Step 11 so Azure Monitor can actually trigger the alert-driven incident path from the blog.
 4. Run Step 12 for the CPU-starvation incident and Step 13 for the OOMKilled incident.
@@ -707,6 +753,102 @@ This README contains the complete AKS deployment steps, connector configuration,
 
 ---
 
+## Azure CLI Provisioning Audit
+
+| Previous CLI operation | Bicep owner |
+|---|---|
+| `az group create` | `infra/main.bicep` (subscription scope) |
+| `az feature register` for public-IP compatibility | `infra/subscription-prerequisites.bicep` |
+| `az aks create` | `infra/modules/aks-cluster.bicep`, orchestrated by `infra/private-cluster-prereqs.bicep` |
+| `az network private-dns link vnet create` | `infra/modules/private-dns-link.bicep`, deployed in the discovered node resource group |
+| `az aks nodepool update --node-taints` | AKS `agentPoolProfiles[].nodeTaints` at creation; Step 4 verifies it |
+| `az aks update --enable-keda` | AKS `workloadAutoScalerProfile.keda`; Step 7 verifies it |
+| `az aks enable-addons --addons monitoring` | AKS `addonProfiles.omsagent` and `infra/modules/aks-monitoring.bicep` |
+| Scenario `az aks update` ACNS, metrics, and network-log flags | AKS networking/monitoring profiles and `enableContainerNetworkLogs` with collection infrastructure |
+| Recording rules implicitly created by `--enable-azure-monitor-metrics` | `infra/modules/prometheus-recording-rules.bicep`, populated by read-only recommendation discovery |
+
+Remaining CLI commands are intentional:
+
+- `az deployment ... create` submits Bicep deployments; it does not define
+  resources imperatively.
+- `az provider register` is a subscription registration action, not an ARM
+  resource with a declarative Bicep equivalent. Registration must be propagated
+  and polled before resource deployment, including after feature registration.
+- Account selection/login, extension installation/update, `ssh-keygen`, and
+  the Bastion tunnel manage local tooling/session state rather than Azure resources.
+- `az ... show/list`, feature/provider polling, and deployment-output queries
+  are read-only discovery or verification, including the service-generated DNS
+  zone. `az rest --method get` reads Monitor's current recording-rule
+  recommendations; Bicep deploys those rules.
+- `az group delete` is explicit teardown, not provisioning. Bicep incremental
+  deployments do not express resource-group deletion.
+- `kubectl` applies workloads, Karpenter CRDs, and incident scenarios to the
+  private Kubernetes API. Internal load balancers and NAP-created nodes remain
+  controller-owned, not competing Bicep-managed Azure resources.
+
+No imperative Azure resource provisioning/configuration commands remain in the
+setup scripts or current deployment instructions except provider registration.
+The historical validation evidence in `.azure/deployment-plan.md` describes
+earlier deployments, not validation of this migration.
+
+### Why a small launcher remains
+
+`Deploy-Demo.ps1` is the only infrastructure command users need to run.
+Its registration helper waits for subscription prerequisites before the main
+deployment. After the main deployment, it discovers the AKS-managed DNS zone
+and Monitor recording-rule recommendations and passes them to Bicep modules.
+The generated node resource group/zone and recommendation content are not
+known before AKS and the workspace exist; Bicep cannot use runtime module
+outputs as a deployment scope or issue that recommendation GET itself.
+These discovery stages are therefore automatic, not a manual script sequence.
+
+Keeping these operations local avoids introducing Azure deployment-script
+resources, additional execution identities/RBAC, or a customer-managed private
+DNS zone solely to remove the launcher. The existing system-managed DNS outcome
+is preserved. Kubernetes workloads, private-API tunnels, and optional portal
+integrations remain separate operational tasks.
+
+### Deployment validation
+
+From the repository root, with a public key available:
+
+```powershell
+$env:AKS_SSH_PUBLIC_KEY = (Get-Content -Raw "$HOME/.ssh/id_rsa.pub").Trim()
+Get-ChildItem .\infra -Recurse -Filter *.bicep | ForEach-Object {
+    bicep build $_.FullName --stdout | Out-Null
+    bicep lint $_.FullName
+}
+Get-ChildItem .\infra -Filter *.bicepparam | ForEach-Object {
+    bicep build-params $_.FullName --stdout | Out-Null
+}
+```
+
+With Azure login and registered providers, review the complete subscription
+deployment before applying it (the resource group need not exist yet):
+
+```powershell
+az deployment sub validate `
+  --location $LOCATION `
+  --template-file .\infra\main.bicep `
+  --parameters .\infra\main.bicepparam `
+  resourceGroupName=$RESOURCE_GROUP location=$LOCATION aksClusterName=$CLUSTER_NAME
+az deployment sub what-if `
+  --location $LOCATION `
+  --template-file .\infra\main.bicep `
+  --parameters .\infra\main.bicepparam `
+  resourceGroupName=$RESOURCE_GROUP location=$LOCATION aksClusterName=$CLUSTER_NAME
+```
+
+Supply `associateExistingPolicyManagedNsgs=false` for initial provisioning with
+no policy NSGs, or `true` when all four exist. Include
+`enableContainerNetworkLogs=true` if using the network-log option. Azure-backed
+validation/what-if and a live deployment are required to verify regional AKS/SKU
+availability, quotas, policy, and telemetry delivery; local compilation alone
+does not prove those conditions.
+Use the launcher for deployment so the discovered DNS link and recording-rule
+modules are applied too; those post-deployment modules are not part of the
+main template's validate/what-if.
+
 ## Cleanup
 
 To delete all Azure resources when done:
@@ -724,6 +866,7 @@ nap/
 │   ├── 00-variables.ps1
 │   ├── 01-prerequisites.ps1
 │   ├── 02-create-cluster.ps1
+│   ├── Deploy-Demo.ps1
 │   ├── 03-deploy-app.ps1
 │   ├── 04-setup-nap.ps1
 │   ├── 05-arm-nodepool.ps1

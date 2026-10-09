@@ -1,6 +1,6 @@
 # ============================================================
 # Step 1 - Prerequisites
-#   Register the NAP preview feature and install the CLI extension
+#   Register providers and the public-IP feature; install the CLI extension
 # ============================================================
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\00-variables.ps1"
@@ -63,9 +63,10 @@ Assert-AzCliSucceeded "Reading Microsoft.Network/$networkFeature registration st
 
 if ($networkFeatureState -ne "Registered") {
     Write-Host "Registering Microsoft.Network/$networkFeature..." -ForegroundColor Yellow
-    az feature register `
-      --namespace "Microsoft.Network" `
-      --name $networkFeature `
+    az deployment sub create `
+      --name "sre-agent-subscription-prerequisites" `
+      --location $LOCATION `
+      --template-file "$PSScriptRoot\infra\subscription-prerequisites.bicep" `
       --only-show-errors
     Assert-AzCliSucceeded "Registering Microsoft.Network/$networkFeature"
 
@@ -92,6 +93,11 @@ if ($networkFeatureState -ne "Registered") {
 Register-AzProvider "Microsoft.Network"
 Register-AzProvider "Microsoft.ManagedIdentity"
 Register-AzProvider "Microsoft.ContainerService"
+Register-AzProvider "Microsoft.OperationalInsights"
+Register-AzProvider "Microsoft.Insights"
+Register-AzProvider "Microsoft.Monitor"
+Register-AzProvider "Microsoft.AlertsManagement"
+Register-AzProvider "Microsoft.App"
 
 # Install the preview extension that contains the GA az aks bastion command group.
 az extension show --name aks-preview --only-show-errors 2>$null | Out-Null

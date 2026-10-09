@@ -1,7 +1,13 @@
 using './main.bicep'
 
 param location = 'swedencentral'
+param resourceGroupName = 'Azure-SRE-Agent-Demo_RG'
 param aksClusterName = 'Azure-SRE-Agent-Demo-Cluster'
+param sshPublicKey = readEnvironmentVariable('AKS_SSH_PUBLIC_KEY')
+param systemNodeVmSize = 'Standard_D4s_v5'
+param systemNodeCount = 3
+param azureMonitorWorkspaceName = 'amw-sre-agent-aks-demo'
+param enableContainerNetworkLogs = false
 param sreAgentName = 'sre-agent-aks-demo'
 param managedIdentityName = 'id-sre-agent-aks-demo'
 param logAnalyticsWorkspaceName = 'law-sre-agent-aks-demo'
