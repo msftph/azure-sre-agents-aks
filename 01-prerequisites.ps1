@@ -97,6 +97,7 @@ Register-AzProvider "Microsoft.OperationalInsights"
 Register-AzProvider "Microsoft.Insights"
 Register-AzProvider "Microsoft.Monitor"
 Register-AzProvider "Microsoft.AlertsManagement"
+Register-AzProvider "Microsoft.App"
 
 # Install the preview extension that contains the GA az aks bastion command group.
 az extension show --name aks-preview --only-show-errors 2>$null | Out-Null

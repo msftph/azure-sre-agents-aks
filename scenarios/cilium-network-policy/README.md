@@ -28,9 +28,9 @@ The source article's Cluster Mesh identity case is not automated here because th
 - PowerShell 7+
 - Kubernetes 1.33+ for optional ACNS container network logs
 
-The repository's `02-create-cluster.ps1` deploys Cilium, ACNS, and Azure Monitor
+The repository's `Deploy-Demo.ps1` deploys Cilium, ACNS, and Azure Monitor
 managed Prometheus through Bicep. Create the demo cluster using the root
-[setup instructions](../../README.md#step-2--create-aks-cluster), then open its
+[setup instructions](../../README.md#step-2--deploy-the-complete-azure-infrastructure), then open its
 private API tunnel before running this scenario:
 
 ```powershell
@@ -108,7 +108,7 @@ when the ACNS logging CRD is available. To persist those flows in Azure Monitor,
 run Step 2 from the repository root with the network-log option before connecting:
 
 ```powershell
-.\02-create-cluster.ps1 -EnableContainerNetworkLogs
+.\Deploy-Demo.ps1 -EnableContainerNetworkLogs
 ```
 
 This sets Bicep's `enableContainerNetworkLogs=true`, configures the monitoring
