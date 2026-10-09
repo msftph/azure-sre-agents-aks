@@ -17,13 +17,40 @@ function Assert-AzCliSucceeded {
 az group create -n $RESOURCE_GROUP -l $LOCATION
 Assert-AzCliSucceeded "Creating resource group '$RESOURCE_GROUP'"
 
+$policyManagedNsgNames = @(
+    "vnet-sre-agent-aks-demo-snet-sre-agent-nsg-$LOCATION"
+    "vnet-sre-agent-aks-demo-AzureBastionSubnet-nsg-$LOCATION"
+    "vnet-aks-sre-agent-demo-snet-aks-nodes-nsg-$LOCATION"
+    "vnet-aks-sre-agent-demo-snet-aks-api-server-nsg-$LOCATION"
+)
+$existingPolicyManagedNsgCount = 0
+foreach ($networkSecurityGroupName in $policyManagedNsgNames) {
+    az network nsg show `
+      --resource-group $RESOURCE_GROUP `
+      --name $networkSecurityGroupName `
+      --only-show-errors `
+      --output none 2>$null
+
+    if ($LASTEXITCODE -eq 0) {
+        $existingPolicyManagedNsgCount++
+    }
+}
+
+if ($existingPolicyManagedNsgCount -eq $policyManagedNsgNames.Count) {
+    $associateExistingPolicyManagedNsgs = "true"
+} elseif ($existingPolicyManagedNsgCount -eq 0) {
+    $associateExistingPolicyManagedNsgs = "false"
+} else {
+    throw "Only $existingPolicyManagedNsgCount of $($policyManagedNsgNames.Count) expected policy-managed NSGs exist. Resolve the partial policy deployment before updating the VNets."
+}
+
 Write-Host "Deploying private AKS networking and Azure Bastion..." -ForegroundColor Yellow
 $prerequisiteOutputs = az deployment group create `
   --name "private-aks-prerequisites" `
   --resource-group $RESOURCE_GROUP `
   --template-file "$PSScriptRoot\infra\private-cluster-prereqs.bicep" `
   --parameters "$PSScriptRoot\infra\private-cluster-prereqs.bicepparam" `
-  --parameters location=$LOCATION `
+  --parameters location=$LOCATION associateExistingPolicyManagedNsgs=$associateExistingPolicyManagedNsgs `
   --query "properties.outputs" `
   --output json | ConvertFrom-Json
 Assert-AzCliSucceeded "Deploying private AKS prerequisites"

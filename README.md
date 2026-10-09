@@ -103,6 +103,13 @@ Loads shared environment variables (`$SUBSCRIPTION_ID`, `$RESOURCE_GROUP`, `$LOC
 > **Important:** This path is intended for a new cluster. It does not delete or
 > convert an existing public cluster. Cluster and Bastion provisioning can take
 > 10-20 minutes.
+>
+> The deployment detects the four policy-managed subnet NSGs. On the first
+> deployment, when none exist, it creates the networking without NSG
+> associations and allows policy to provision them. On repeat deployments, it
+> brings all four NSGs into Bicep as existing resources and preserves their
+> subnet associations. A partial set is treated as an error rather than risking
+> an NSG detach.
 
 ### Step 2B — Connect to private AKS through Azure Bastion
 
@@ -162,6 +169,11 @@ az deployment group create `
 The template uses the stable demo resource names, so an incremental deployment
 updates an existing `sre-agent-aks-demo` environment rather than creating a
 second agent.
+
+The checked-in parameter file sets
+`associateExistingPolicyManagedNsgs=true` for repeat deployments in the
+policy-managed environment. Set it to `false` only for initial provisioning
+where none of the expected NSGs exist.
 
 If the target environment already has equivalent manually created role
 assignments, disable role creation to avoid `RoleAssignmentExists` conflicts:

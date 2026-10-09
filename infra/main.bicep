@@ -51,6 +51,9 @@ param aksApiServerSubnetName string = 'snet-aks-api-server'
 @description('Address prefix for the AKS API server subnet.')
 param aksApiServerSubnetAddressPrefix string = '10.224.16.0/28'
 
+@description('Preserve policy-managed NSG associations when updating existing subnets.')
+param associateExistingPolicyManagedNsgs bool = false
+
 @description('Name of the AKS user-assigned managed identity.')
 param aksIdentityName string = 'id-aks-sre-agent-demo'
 
@@ -83,6 +86,7 @@ module network './modules/network.bicep' = {
     aksNodeSubnetAddressPrefix: aksNodeSubnetAddressPrefix
     aksApiServerSubnetName: aksApiServerSubnetName
     aksApiServerSubnetAddressPrefix: aksApiServerSubnetAddressPrefix
+    associateExistingPolicyManagedNsgs: associateExistingPolicyManagedNsgs
   }
 }
 

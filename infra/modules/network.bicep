@@ -34,6 +34,37 @@ param aksApiServerSubnetName string
 @description('Address prefix for the AKS API server subnet. API Server VNet Integration requires at least a /28.')
 param aksApiServerSubnetAddressPrefix string
 
+@description('Associate the policy-managed network security groups that already exist for each subnet.')
+param associateExistingPolicyManagedNsgs bool = false
+
+@description('Name of the policy-managed network security group for the SRE Agent subnet.')
+param agentSubnetNetworkSecurityGroupName string = '${managementVirtualNetworkName}-${agentSubnetName}-nsg-${location}'
+
+@description('Name of the policy-managed network security group for AzureBastionSubnet.')
+param bastionSubnetNetworkSecurityGroupName string = '${managementVirtualNetworkName}-AzureBastionSubnet-nsg-${location}'
+
+@description('Name of the policy-managed network security group for the AKS node subnet.')
+param aksNodeSubnetNetworkSecurityGroupName string = '${aksVirtualNetworkName}-${aksNodeSubnetName}-nsg-${location}'
+
+@description('Name of the policy-managed network security group for the AKS API server subnet.')
+param aksApiServerSubnetNetworkSecurityGroupName string = '${aksVirtualNetworkName}-${aksApiServerSubnetName}-nsg-${location}'
+
+resource agentSubnetNetworkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2024-07-01' existing = {
+  name: agentSubnetNetworkSecurityGroupName
+}
+
+resource bastionSubnetNetworkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2024-07-01' existing = {
+  name: bastionSubnetNetworkSecurityGroupName
+}
+
+resource aksNodeSubnetNetworkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2024-07-01' existing = {
+  name: aksNodeSubnetNetworkSecurityGroupName
+}
+
+resource aksApiServerSubnetNetworkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2024-07-01' existing = {
+  name: aksApiServerSubnetNetworkSecurityGroupName
+}
+
 resource managementVirtualNetwork 'Microsoft.Network/virtualNetworks@2024-07-01' = {
   name: managementVirtualNetworkName
   location: location
@@ -48,6 +79,9 @@ resource managementVirtualNetwork 'Microsoft.Network/virtualNetworks@2024-07-01'
         name: agentSubnetName
         properties: {
           addressPrefix: agentSubnetAddressPrefix
+          networkSecurityGroup: associateExistingPolicyManagedNsgs ? {
+            id: agentSubnetNetworkSecurityGroup.id
+          } : null
           delegations: [
             {
               name: 'sre-agent-delegation'
@@ -62,6 +96,9 @@ resource managementVirtualNetwork 'Microsoft.Network/virtualNetworks@2024-07-01'
         name: 'AzureBastionSubnet'
         properties: {
           addressPrefix: bastionSubnetAddressPrefix
+          networkSecurityGroup: associateExistingPolicyManagedNsgs ? {
+            id: bastionSubnetNetworkSecurityGroup.id
+          } : null
         }
       }
     ]
@@ -82,12 +119,18 @@ resource aksVirtualNetwork 'Microsoft.Network/virtualNetworks@2024-07-01' = {
         name: aksNodeSubnetName
         properties: {
           addressPrefix: aksNodeSubnetAddressPrefix
+          networkSecurityGroup: associateExistingPolicyManagedNsgs ? {
+            id: aksNodeSubnetNetworkSecurityGroup.id
+          } : null
         }
       }
       {
         name: aksApiServerSubnetName
         properties: {
           addressPrefix: aksApiServerSubnetAddressPrefix
+          networkSecurityGroup: associateExistingPolicyManagedNsgs ? {
+            id: aksApiServerSubnetNetworkSecurityGroup.id
+          } : null
           delegations: [
             {
               name: 'aks-api-server-delegation'

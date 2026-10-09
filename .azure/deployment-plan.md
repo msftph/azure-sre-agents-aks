@@ -118,16 +118,18 @@ the live AKS cluster as part of template validation.
 
 | Check | Command or evidence | Result |
 |-------|---------------------|--------|
-| Authoritative core validation | `validate-deployment.ps1 -Scope group -ResourceGroup rg-sre-aks -Template .\infra\private-cluster-prereqs.bicep -Parameters .\infra\private-cluster-prereqs.bicepparam` | PASS; Create 10, Modify 0, Delete 0 |
-| Full template validation | `az deployment group validate` for `infra/main.bicep` with the live AKS name and role creation disabled | PASS |
+| Authoritative core validation | `validate-deployment.ps1 -Scope group -ResourceGroup rg-sre-aks -Template .\infra\private-cluster-prereqs.bicep -Parameters .\infra\private-cluster-prereqs.bicepparam` | PASS |
+| Private prerequisites structured what-if | `az deployment group what-if` with `infra/private-cluster-prereqs.bicepparam` on 2026-10-09 | PASS; Create 0, Delete 0, NSG association deletions 0 |
+| Full template validation | `az deployment group validate` for `infra/main.bicep` with the live AKS name and role creation disabled on 2026-10-09 | PASS |
+| Full template structured what-if | `az deployment group what-if` with the live AKS name and role creation disabled on 2026-10-09 | PASS; Create 0, Delete 0, NSG association deletions 0 |
 | Bicep compilation | `az bicep build` for every `.bicep` file | PASS |
 | Bicep linting | `az bicep lint` for every `.bicep` file | PASS with no diagnostics |
 | Parameter compilation | `az bicep build-params` for both `.bicepparam` files | PASS |
 | PowerShell parsing | PowerShell AST parser for all changed scripts | PASS |
 | Bastion CLI | Azure CLI 2.89.1 plus `az aks bastion tunnel --help` | PASS |
-| Azure Policy | Effective management-group and subscription assignments listed; ARM validation and what-if succeeded under the effective deny policies | PASS |
+| Azure Policy | Effective management-group and subscription assignments listed on 2026-10-09; ARM validation and what-if succeeded under the effective deny policies | PASS |
 | RBAC | Static review of AKS and SRE Agent role assignments | PASS |
-| Destructive changes | What-if deletion count | 0 |
+| Destructive changes | Structured what-if resource deletion count and subnet NSG association deletion count | 0 |
 | Deployment | Not requested and not performed | N/A |
 
 ### Deployment Error Recovery

@@ -13,6 +13,7 @@ param aksNodeSubnetName = 'snet-aks-nodes'
 param aksNodeSubnetAddressPrefix = '10.224.0.0/20'
 param aksApiServerSubnetName = 'snet-aks-api-server'
 param aksApiServerSubnetAddressPrefix = '10.224.16.0/28'
+param associateExistingPolicyManagedNsgs = true
 
 param aksIdentityName = 'id-aks-sre-agent-demo'
 param bastionName = 'bas-sre-agent-aks-demo'
