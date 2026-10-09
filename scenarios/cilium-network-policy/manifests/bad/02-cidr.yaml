@@ -1,0 +1,12 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cidr-ingress
+  namespace: cilium-policy-demo
+spec:
+  endpointSelector:
+    matchLabels:
+      app: cidr-server
+  ingress:
+    - fromCIDR:
+        - 0.0.0.0/0

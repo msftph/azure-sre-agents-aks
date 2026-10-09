@@ -1,12 +1,15 @@
 # AKS NAP (Node Auto-Provisioning) Demo — PowerShell Scripts
 
-This folder contains PowerShell scripts to deploy an AKS cluster with **Node Auto-Provisioning (NAP/Karpenter)**, run the [AKS Store Demo](https://github.com/Azure-Samples/aks-store-demo) application, and reproduce the two incident flows used in the blog post: **CPU starvation** and **OOMKilled** troubleshooting with Azure SRE Agent.
+This folder contains PowerShell scripts to deploy an AKS cluster with **Node Auto-Provisioning (NAP/Karpenter)**, run the [AKS Store Demo](https://github.com/Azure-Samples/aks-store-demo) application, and reproduce the two incident flows used in the blog post: **CPU starvation** and **OOMKilled** troubleshooting with Azure SRE Agent. It also includes a standalone [Cilium network policy misconfiguration scenario](./scenarios/cilium-network-policy/README.md).
 
 ## Prerequisites
 
 - [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) installed
 - [kubectl](https://kubernetes.io/docs/tasks/tools/) installed
+- Azure CLI 2.85.0 or later for `az aks bastion tunnel`
 - An Azure subscription with permissions to create AKS clusters
+- Permission to create role assignments, virtual networks, public IP addresses,
+  and Azure Bastion
 - PowerShell 7+ (recommended)
 
 ## Before You Start
@@ -59,9 +62,10 @@ Loads shared environment variables (`$SUBSCRIPTION_ID`, `$RESOURCE_GROUP`, `$LOC
 ```
 
 - Sets the active Azure subscription
-- Registers the `NodeAutoProvisioningPreview` feature flag (waits until registered)
-- Refreshes the `Microsoft.ContainerService` provider
-- Installs/updates the `aks-preview` CLI extension
+- Verifies Azure CLI 2.85.0 or later
+- Registers the enterprise public-IP compatibility feature used by this subscription
+- Registers the Network, Managed Identity, and AKS providers
+- Installs the `aks-preview` extension that contains `az aks bastion`
 
 > **Note:** Feature registration can take 5-15 minutes.
 
@@ -74,14 +78,137 @@ Loads shared environment variables (`$SUBSCRIPTION_ID`, `$RESOURCE_GROUP`, `$LOC
 ```
 
 - Creates the resource group
+- Deploys the private-network prerequisites from
+  `infra/private-cluster-prereqs.bicep`:
+  - management VNet `10.250.0.0/24`
+  - SRE Agent delegated subnet `10.250.0.0/27`
+  - `AzureBastionSubnet` `10.250.0.64/26`
+  - customer-managed AKS VNet `10.224.0.0/16`
+  - node subnet `10.224.0.0/20`
+  - delegated API server subnet `10.224.16.0/28`
+  - bidirectional VNet peering
+  - AKS user-assigned identity and subnet permissions
+  - Azure Bastion Standard with native client tunneling enabled
 - Creates an AKS cluster with:
+  - a private API endpoint and no public FQDN
+  - API Server VNet Integration
   - **NAP enabled** (`--node-provisioning-mode Auto`)
   - Azure CNI Overlay networking
   - Cilium dataplane
+  - **Advanced Container Networking Services (ACNS)** for Cilium/Hubble network observability
   - **Managed Prometheus** (`--enable-azure-monitor-metrics`)
-- Downloads cluster credentials to your kubeconfig
+- Links the AKS-managed private DNS zone to the management VNet
+- Prints the command used to open a Bastion-backed Kubernetes shell
 
-> **Note:** Cluster creation takes ~5-10 minutes.
+> **Important:** This path is intended for a new cluster. It does not delete or
+> convert an existing public cluster. Cluster and Bastion provisioning can take
+> 10-20 minutes.
+>
+> The deployment detects the four policy-managed subnet NSGs. On the first
+> deployment, when none exist, it creates the networking without NSG
+> associations and allows policy to provision them. On repeat deployments, it
+> brings all four NSGs into Bicep as existing resources and preserves their
+> subnet associations. A partial set is treated as an error rather than risking
+> an NSG detach.
+
+### Step 2B — Connect to private AKS through Azure Bastion
+
+The tunnel command launches a subshell with a temporary kubeconfig that points
+at a local Bastion tunnel. No VPN client, jump-box VM, or workstation route to
+the AKS VNet is required.
+
+```powershell
+.\Connect-AksViaBastion.ps1
+```
+
+Inside the new shell:
+
+```powershell
+kubectl get nodes
+kubectl get pods -A
+```
+
+Type `exit` to close the subshell and tunnel. The helper defaults to local port
+`50001` and cluster-admin credentials. Both can be overridden:
+
+```powershell
+.\Connect-AksViaBastion.ps1 -Port 50002 -UseAdminCredentials $false
+```
+
+Required access includes Reader on the AKS cluster, Bastion, and relevant VNet,
+plus permission to retrieve the selected Kubernetes credentials. The
+cluster-admin option requires the Azure Kubernetes Service Cluster Admin Role.
+
+---
+
+### Step 2A — Deploy the VNet-integrated Azure SRE Agent
+
+The Bicep deployment under `infra/` creates or incrementally updates:
+
+- the management and AKS VNets created during Step 2
+- the SRE Agent delegated subnet and `AzureBastionSubnet`
+- the peering between the management and AKS VNets
+- the AKS identity and subnet role assignments
+- Azure Bastion Standard with native client tunneling enabled
+- the SRE Agent user-assigned managed identity
+- Log Analytics and Application Insights resources
+- the `Microsoft.App/agents` resource
+- Azure Monitor, Log Analytics, and Application Insights connectors
+- the monitoring and AKS role assignments required by this demo
+
+```powershell
+az deployment group create `
+  --name sre-agent-infrastructure `
+  --resource-group $RESOURCE_GROUP `
+  --template-file .\infra\main.bicep `
+  --parameters .\infra\main.bicepparam `
+  location=$LOCATION `
+  aksClusterName=$CLUSTER_NAME
+```
+
+The template uses the stable demo resource names, so an incremental deployment
+updates an existing `sre-agent-aks-demo` environment rather than creating a
+second agent.
+
+The checked-in parameter file sets
+`associateExistingPolicyManagedNsgs=true` for repeat deployments in the
+policy-managed environment. Set it to `false` only for initial provisioning
+where none of the expected NSGs exist.
+
+If the target environment already has equivalent manually created role
+assignments, disable role creation to avoid `RoleAssignmentExists` conflicts:
+
+```powershell
+az deployment group create `
+  --name sre-agent-infrastructure `
+  --resource-group $RESOURCE_GROUP `
+  --template-file .\infra\main.bicep `
+  --parameters .\infra\main.bicepparam `
+  location=$LOCATION `
+  aksClusterName=$CLUSTER_NAME `
+  deployRoleAssignments=false
+```
+
+Connect AKS Container Insights to the workspace created by the deployment:
+
+```powershell
+$LAW_ID = az deployment group show `
+  --resource-group $RESOURCE_GROUP `
+  --name sre-agent-infrastructure `
+  --query properties.outputs.logAnalyticsWorkspaceId.value `
+  --output tsv
+
+az aks enable-addons `
+  --resource-group $RESOURCE_GROUP `
+  --name $CLUSTER_NAME `
+  --addons monitoring `
+  --workspace-resource-id $LAW_ID
+```
+
+> **VNet scope:** A fresh deployment created through Step 2 uses a private AKS
+> API with its public FQDN disabled. The template does not convert an existing
+> public cluster and does not remove AKS outbound internet access. Bastion keeps
+> a controlled public frontend so local clients can establish the tunnel.
 
 ---
 
@@ -93,8 +220,19 @@ Loads shared environment variables (`$SUBSCRIPTION_ID`, `$RESOURCE_GROUP`, `$LOC
 
 - Creates the `pets` namespace
 - Deploys the local manifests in `./manifests/aks-store` (MongoDB, RabbitMQ, order-service, product-service, makeline-service, store-front, store-admin, virtual-customer, virtual-worker)
+- Creates Store Front and Store Admin as internal Azure load balancers
 - Waits for all pods to be Ready
-- Prints the Store Front URL
+- Prints the private Store Front address and a local port-forward command
+
+Run this step inside the shell created by `Connect-AksViaBastion.ps1`. To open
+the Store Front in the local browser:
+
+```powershell
+kubectl port-forward -n pets service/store-front 8080:80
+```
+
+Then browse to [http://localhost:8080](http://localhost:8080). The port-forward
+travels through the same Bastion-backed Kubernetes API tunnel.
 
 ---
 
@@ -171,42 +309,41 @@ kubectl exec rabbitmq-0 -n pets -- rabbitmqctl list_queues
 
 ---
 
-### Step 8 — Configure Azure SRE Agent (Portal)
+### Step 8 — Verify and Extend Azure SRE Agent Configuration
 
-This step is performed in the Azure portal at **[sre.azure.com](https://sre.azure.com)**.
+The Bicep deployment in Step 2A creates the agent, its identities, managed
+resource scope, VNet integration, core connectors, and scenario-specific Azure
+RBAC. Open **[sre.azure.com](https://sre.azure.com)** to verify the deployment
+and configure optional integrations such as GitHub and Teams.
 
 Azure SRE Agent configuration for this demo came down to four things: **scope**, **permissions**, **incident intake**, and **response mode**.
 
-**A — Create the agent and scope it correctly**
+**A — Verify the agent scope**
 
-1. Create an Azure SRE Agent resource and scope it to the demo resource group.
-2. During deployment, Azure SRE Agent creates two managed identities:
+1. Confirm `sre-agent-aks-demo` lists the demo resource group as a managed resource.
+2. Confirm the deployment created two managed identities:
     - a **user-assigned managed identity (UAMI)** used for RBAC and connector access
     - a system-assigned identity used internally by the service
-3. Use the **UAMI** for the role assignments and connector setup below.
-4. Add the demo resource group as a **managed resource** so the agent can investigate resources within that scope.
+3. Confirm the agent shows a delegated subnet under its VNet configuration.
 
-**B — Grant scenario-specific AKS access**
+**B — Verify scenario-specific AKS access**
 
-Core monitoring roles are assigned during setup. For this demo, I added AKS-specific rights so the agent could complete remediation end to end. Treat these as **scenario-specific**, not a default production baseline.
+The Bicep template assigns the following scenario-specific permissions when
+`deployRoleAssignments=true`:
 
-```bash
-az role assignment create \
-   --assignee "<uami-client-id>" \
-   --role "Azure Kubernetes Service Cluster Admin Role" \
-   --scope "/subscriptions/<sub-id>/resourcegroups/Azure-SRE-Agent-Demo_RG"
+- Reader
+- Monitoring Reader and Monitoring Contributor
+- Log Analytics Reader
+- Azure Kubernetes Service Cluster Admin Role
+- Azure Kubernetes Service Contributor Role
 
-az role assignment create \
-   --assignee "<uami-client-id>" \
-   --role "Azure Kubernetes Service Contributor Role" \
-   --scope "/subscriptions/<sub-id>/resourcegroups/Azure-SRE-Agent-Demo_RG"
-```
+Treat these as **demo-specific**, not a default production baseline.
 
 **C — Connect Azure Monitor as the incident platform**
 
-1. In Azure SRE Agent, configure **Azure Monitor** as the incident platform.
-2. Copy the generated webhook URL.
-3. Route the AKS alert to that webhook through an Azure Monitor **Action Group**.
+The Bicep deployment creates the Azure Monitor connector and configures Azure
+Monitor as the incident platform. Confirm the connector reports **Connected**
+before reproducing an incident.
 
 This distinction matters: Azure Monitor handles how incidents **enter** the workflow, while connectors such as GitHub and Teams extend the workflow **outward** for tracking and communication.
 
@@ -519,6 +656,18 @@ If you assign that issue to GitHub Copilot agent, the workflow can continue into
 
 ---
 
+## Standalone Scenario — Cilium Network Policy Misconfigurations
+
+The [`scenarios/cilium-network-policy`](./scenarios/cilium-network-policy/README.md) lab reproduces three Cilium-specific connectivity failures without any third-party monitoring dependency:
+
+- cross-namespace selectors that omit the namespace label
+- CIDR rules that are incorrectly expected to match Cilium-managed pods
+- unsupported `toServices` and `toPorts` combinations
+
+The scenario uses AKS Advanced Container Networking Services, Hubble, Azure Monitor managed Prometheus, and optional Container Insights flow logs for diagnostics. It is independent of the AKS Store application and can be set up, broken, fixed, and removed with the PowerShell scripts in the scenario folder.
+
+---
+
 ## Try It Yourself
 
 If you are coming from the blog post, this README is the full setup appendix.
@@ -553,6 +702,8 @@ This README contains the complete AKS deployment steps, connector configuration,
 | AKS Store Demo | [github.com/Azure-Samples/aks-store-demo](https://github.com/Azure-Samples/aks-store-demo) |
 | Node Auto-Provisioning | [learn.microsoft.com/azure/aks/node-autoprovision](https://learn.microsoft.com/azure/aks/node-autoprovision) |
 | KEDA on AKS | [learn.microsoft.com/azure/aks/keda-about](https://learn.microsoft.com/azure/aks/keda-about) |
+| Azure CNI powered by Cilium | [learn.microsoft.com/azure/aks/azure-cni-powered-by-cilium](https://learn.microsoft.com/azure/aks/azure-cni-powered-by-cilium) |
+| Container Network Observability | [learn.microsoft.com/azure/aks/container-network-observability-how-to](https://learn.microsoft.com/azure/aks/container-network-observability-how-to) |
 
 ---
 
@@ -580,6 +731,8 @@ nap/
 │   ├── 07-setup-keda-scaler.ps1
 │   ├── 08-setup-github-issues.ps1
 │   ├── README.md
+│   ├── scenarios/
+│   │   └── cilium-network-policy/
 │   └── manifests/
 │       ├── aks-store/
 │       │   ├── 00-mongodb.yaml

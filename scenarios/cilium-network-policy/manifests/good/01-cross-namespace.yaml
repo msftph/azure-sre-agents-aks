@@ -1,0 +1,17 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cross-namespace-ingress
+  namespace: cilium-policy-demo
+spec:
+  endpointSelector:
+    matchLabels:
+      app: cross-namespace-server
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: cross-namespace-client
+            k8s:io.kubernetes.pod.namespace: cilium-policy-demo
+        - matchLabels:
+            app: cross-namespace-client
+            k8s:io.kubernetes.pod.namespace: cilium-policy-observer

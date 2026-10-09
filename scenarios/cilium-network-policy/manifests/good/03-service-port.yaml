@@ -1,0 +1,17 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: service-port-egress
+  namespace: cilium-policy-demo
+spec:
+  endpointSelector:
+    matchLabels:
+      app: service-port-client
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app: service-port-server
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP

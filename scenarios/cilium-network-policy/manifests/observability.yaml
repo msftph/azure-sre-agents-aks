@@ -1,0 +1,17 @@
+apiVersion: acn.azure.com/v1alpha1
+kind: ContainerNetworkLog
+metadata:
+  name: cilium-policy-demo
+spec:
+  includefilters:
+    - name: cilium-policy-demo-traffic
+      from:
+        labelSelector:
+          matchExpressions:
+            - key: scenario
+              operator: Exists
+      protocol:
+        - tcp
+      verdict:
+        - forwarded
+        - dropped
