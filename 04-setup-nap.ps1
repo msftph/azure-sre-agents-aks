@@ -1,26 +1,25 @@
 # ============================================================
-# Step 4 - Taint the system node pool so NAP provisions user nodes
+# Step 4 - Verify the Bicep-managed system taint and monitor NAP
 # ============================================================
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\00-variables.ps1"
 
-# Discover the default (system) nodepool name
-$defaultNodepoolName = az aks nodepool list `
+# Inspect the Bicep-managed system node pool
+$systemNodepool = az aks nodepool list `
   -g $RESOURCE_GROUP `
   --cluster-name $CLUSTER_NAME `
-  --query '[0].name' -o tsv
+  --query "[?mode=='System'] | [0]" -o json | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) {
+    throw "Reading the system node pool failed with Azure CLI exit code $LASTEXITCODE."
+}
 
-Write-Host "Default nodepool: $defaultNodepoolName" -ForegroundColor Yellow
-
-# Apply the CriticalAddonsOnly taint (NoExecute will evict non-tolerated pods)
-az aks nodepool update `
-  -g $RESOURCE_GROUP `
-  --cluster-name $CLUSTER_NAME `
-  -n $defaultNodepoolName `
-  --node-taints CriticalAddonsOnly=true:NoExecute
+if ($null -eq $systemNodepool -or $systemNodepool.nodeTaints -notcontains "CriticalAddonsOnly=true:NoExecute") {
+    throw "The system pool is missing its Bicep-managed taint. Deploy the private cluster with .\02-create-cluster.ps1 first."
+}
+Write-Host "System nodepool: $($systemNodepool.name)" -ForegroundColor Yellow
 
 Write-Host ""
-Write-Host "Taint applied. NAP will now create user-mode nodes." -ForegroundColor Green
+Write-Host "System taint verified. NAP provisions user-mode nodes for app pods from Step 3." -ForegroundColor Green
 Write-Host ""
 Write-Host "--- Monitor with ---" -ForegroundColor Cyan
 Write-Host "  kubectl get events -A --field-selector source=karpenter -w"

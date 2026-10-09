@@ -8,12 +8,17 @@ $manifestsDir = Join-Path $PSScriptRoot "manifests"
 Write-Host "=== Setting up KEDA ScaledObject for virtual-worker ===" -ForegroundColor Yellow
 Write-Host ""
 
-# Enable the KEDA add-on on AKS (idempotent — no-op if already enabled)
-Write-Host "Enabling AKS KEDA add-on..."
-az aks update `
+# Verify the KEDA add-on deployed by Bicep
+$kedaEnabled = az aks show `
   --resource-group $RESOURCE_GROUP `
   --name $CLUSTER_NAME `
-  --enable-keda
+  --query "workloadAutoScalerProfile.keda.enabled" --output tsv
+if ($LASTEXITCODE -ne 0) {
+    throw "Reading the KEDA add-on state failed with Azure CLI exit code $LASTEXITCODE."
+}
+if ($kedaEnabled -ne "true") {
+    throw "KEDA is not enabled. Deploy the private cluster with .\02-create-cluster.ps1 first."
+}
 
 Write-Host "Waiting for KEDA CRDs to become available..."
 $retries = 0

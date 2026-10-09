@@ -2,6 +2,11 @@
 # Step 2 - Create the AKS cluster
 #   NAP enabled, Azure CNI Overlay with Cilium
 # ============================================================
+param(
+    [string]$SshPublicKeyPath = "$HOME/.ssh/id_rsa.pub",
+    [switch]$EnableContainerNetworkLogs
+)
+
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\00-variables.ps1"
 
@@ -13,9 +18,33 @@ function Assert-AzCliSucceeded {
     }
 }
 
-# Create resource group
-az group create -n $RESOURCE_GROUP -l $LOCATION
-Assert-AzCliSucceeded "Creating resource group '$RESOURCE_GROUP'"
+# Deploy resource group
+az deployment sub create `
+  --name "sre-agent-resource-group" `
+  --location $LOCATION `
+  --template-file "$PSScriptRoot\infra\resource-group.bicep" `
+  --parameters resourceGroupName=$RESOURCE_GROUP location=$LOCATION `
+  --only-show-errors
+Assert-AzCliSucceeded "Deploying resource group '$RESOURCE_GROUP'"
+
+if (-not (Test-Path $SshPublicKeyPath)) {
+    if (-not $SshPublicKeyPath.EndsWith(".pub")) {
+        throw "The SSH public key path must end in '.pub'."
+    }
+    $privateKeyPath = $SshPublicKeyPath.Substring(0, $SshPublicKeyPath.Length - 4)
+    if (Test-Path $privateKeyPath) {
+        throw "Private key '$privateKeyPath' exists but its public key is missing. Restore the public key rather than overwriting the private key."
+    }
+    New-Item -ItemType Directory -Force -Path (Split-Path $SshPublicKeyPath -Parent) | Out-Null
+    ssh-keygen -t rsa -b 4096 -f $privateKeyPath -N "" | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Generating the local SSH key failed with exit code $LASTEXITCODE."
+    }
+}
+$sshPublicKey = (Get-Content -Raw $SshPublicKeyPath).Trim()
+if ($sshPublicKey -notmatch '^ssh-(rsa|ed25519)\s+\S+') {
+    throw "'$SshPublicKeyPath' must contain an SSH public key, not a private key."
+}
 
 $policyManagedNsgNames = @(
     "vnet-sre-agent-aks-demo-snet-sre-agent-nsg-$LOCATION"
@@ -44,54 +73,27 @@ if ($existingPolicyManagedNsgCount -eq $policyManagedNsgNames.Count) {
     throw "Only $existingPolicyManagedNsgCount of $($policyManagedNsgNames.Count) expected policy-managed NSGs exist. Resolve the partial policy deployment before updating the VNets."
 }
 
-Write-Host "Deploying private AKS networking and Azure Bastion..." -ForegroundColor Yellow
-$prerequisiteOutputs = az deployment group create `
-  --name "private-aks-prerequisites" `
-  --resource-group $RESOURCE_GROUP `
-  --template-file "$PSScriptRoot\infra\private-cluster-prereqs.bicep" `
-  --parameters "$PSScriptRoot\infra\private-cluster-prereqs.bicepparam" `
-  --parameters location=$LOCATION associateExistingPolicyManagedNsgs=$associateExistingPolicyManagedNsgs `
-  --query "properties.outputs" `
-  --output json | ConvertFrom-Json
-Assert-AzCliSucceeded "Deploying private AKS prerequisites"
+Write-Host "Deploying private AKS, networking, telemetry, and Azure Bastion... this takes several minutes." -ForegroundColor Yellow
+$previousSshPublicKey = $env:AKS_SSH_PUBLIC_KEY
+try {
+    $env:AKS_SSH_PUBLIC_KEY = $sshPublicKey
+    $prerequisiteOutputs = az deployment group create `
+      --name "private-aks-prerequisites" `
+      --resource-group $RESOURCE_GROUP `
+      --template-file "$PSScriptRoot\infra\private-cluster-prereqs.bicep" `
+      --parameters "$PSScriptRoot\infra\private-cluster-prereqs.bicepparam" `
+      --parameters location=$LOCATION aksClusterName=$CLUSTER_NAME associateExistingPolicyManagedNsgs=$associateExistingPolicyManagedNsgs `
+      enableContainerNetworkLogs=$($EnableContainerNetworkLogs.IsPresent.ToString().ToLowerInvariant()) `
+      --query "properties.outputs" `
+      --output json | ConvertFrom-Json
+    Assert-AzCliSucceeded "Deploying private AKS and prerequisites"
+} finally {
+    $env:AKS_SSH_PUBLIC_KEY = $previousSshPublicKey
+}
 
-$aksNodeSubnetId = $prerequisiteOutputs.aksNodeSubnetId.value
-$aksApiServerSubnetId = $prerequisiteOutputs.aksApiServerSubnetId.value
-$aksIdentityId = $prerequisiteOutputs.aksIdentityId.value
 $managementVirtualNetworkId = $prerequisiteOutputs.managementVirtualNetworkId.value
 $bastionId = $prerequisiteOutputs.bastionId.value
-
-# Create AKS cluster (this takes several minutes)
-Write-Host "Creating private AKS cluster '$CLUSTER_NAME'... this takes several minutes." -ForegroundColor Yellow
-az aks create `
-  --name $CLUSTER_NAME `
-  --resource-group $RESOURCE_GROUP `
-  --enable-managed-identity `
-  --assign-identity $aksIdentityId `
-  --vnet-subnet-id $aksNodeSubnetId `
-  --enable-apiserver-vnet-integration `
-  --apiserver-subnet-id $aksApiServerSubnetId `
-  --enable-private-cluster `
-  --disable-public-fqdn `
-  --private-dns-zone system `
-  --node-provisioning-mode Auto `
-  --network-plugin azure `
-  --network-plugin-mode overlay `
-  --network-dataplane cilium `
-  --pod-cidr 10.244.0.0/16 `
-  --service-cidr 10.0.0.0/16 `
-  --dns-service-ip 10.0.0.10 `
-  --enable-acns `
-  --enable-azure-monitor-metrics `
-  --generate-ssh-keys
-Assert-AzCliSucceeded "Creating private AKS cluster '$CLUSTER_NAME'"
-
-$nodeResourceGroup = az aks show `
-  --resource-group $RESOURCE_GROUP `
-  --name $CLUSTER_NAME `
-  --query nodeResourceGroup `
-  --output tsv
-Assert-AzCliSucceeded "Reading the AKS node resource group"
+$nodeResourceGroup = $prerequisiteOutputs.nodeResourceGroup.value
 
 $privateDnsZones = az network private-dns zone list `
   --resource-group $nodeResourceGroup `
@@ -109,14 +111,66 @@ if ($null -eq $privateDnsZone) {
     throw "The AKS-managed private DNS zone was not found in '$nodeResourceGroup'."
 }
 
-az network private-dns link vnet create `
+az deployment group create `
+  --name "private-aks-management-dns-link" `
   --resource-group $nodeResourceGroup `
-  --zone-name $privateDnsZone.name `
-  --name "link-vnet-sre-agent-aks-demo" `
-  --virtual-network $managementVirtualNetworkId `
-  --registration-enabled false `
+  --template-file "$PSScriptRoot\infra\modules\private-dns-link.bicep" `
+  --parameters privateDnsZoneName=$($privateDnsZone.name) managementVirtualNetworkId=$managementVirtualNetworkId `
   --only-show-errors
 Assert-AzCliSucceeded "Linking the AKS private DNS zone to the management VNet"
+
+$azureMonitorWorkspaceId = $prerequisiteOutputs.azureMonitorWorkspaceId.value
+$recommendations = az rest `
+  --method get `
+  --url "$azureMonitorWorkspaceId/providers/Microsoft.AlertsManagement/alertRuleRecommendations?api-version=2023-01-01-preview" `
+  --output json | ConvertFrom-Json
+Assert-AzCliSucceeded "Reading Azure Monitor recording-rule recommendations"
+
+$ruleGroups = @(
+    foreach ($recommendation in $recommendations.value) {
+        if ($recommendation.properties.alertRuleType -ne "Microsoft.AlertsManagement/prometheusRuleGroups") {
+            continue
+        }
+        foreach ($resource in $recommendation.properties.rulesArmTemplate.resources) {
+            if ($resource.type -ne "Microsoft.AlertsManagement/prometheusRuleGroups") {
+                continue
+            }
+            $rules = @($resource.properties.rules)
+            $alertRules = @($rules | Where-Object { -not $_.record -or -not $_.expression })
+            if ($rules.Count -gt 0 -and $alertRules.Count -eq 0) {
+                @{
+                    name = $recommendation.name
+                    rules = $rules
+                }
+            }
+        }
+    }
+)
+
+if ($ruleGroups.Count -gt 0) {
+    $recordingRuleParameters = New-TemporaryFile
+    try {
+        @{
+            parameters = @{
+                ruleGroups = @{ value = $ruleGroups }
+            }
+        } | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $recordingRuleParameters.FullName
+
+        az deployment group create `
+          --name "private-aks-recording-rules" `
+          --resource-group $RESOURCE_GROUP `
+          --template-file "$PSScriptRoot\infra\modules\prometheus-recording-rules.bicep" `
+          --parameters "@$($recordingRuleParameters.FullName)" `
+          --parameters location=$LOCATION aksClusterName=$CLUSTER_NAME `
+          aksClusterId=$($prerequisiteOutputs.aksClusterId.value) azureMonitorWorkspaceId=$azureMonitorWorkspaceId `
+          --only-show-errors
+        Assert-AzCliSucceeded "Deploying Azure Monitor recording rules"
+    } finally {
+        Remove-Item -LiteralPath $recordingRuleParameters.FullName -Force
+    }
+} else {
+    Write-Warning "Azure Monitor returned no recording-rule recommendations. Metrics ingestion is enabled; rerun Step 2 to retry recommendation discovery."
+}
 
 Write-Host "Private cluster and Azure Bastion are ready." -ForegroundColor Green
 Write-Host "Bastion resource: $bastionId" -ForegroundColor Cyan

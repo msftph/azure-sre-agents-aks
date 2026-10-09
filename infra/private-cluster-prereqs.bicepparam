@@ -1,6 +1,14 @@
 using './private-cluster-prereqs.bicep'
 
 param location = 'swedencentral'
+param aksClusterName = 'Azure-SRE-Agent-Demo-Cluster'
+param sshPublicKey = readEnvironmentVariable('AKS_SSH_PUBLIC_KEY')
+param systemNodeVmSize = 'Standard_D4s_v5'
+param systemNodeCount = 3
+param logAnalyticsWorkspaceName = 'law-sre-agent-aks-demo'
+param applicationInsightsName = 'appi-sre-agent-aks-demo'
+param azureMonitorWorkspaceName = 'amw-sre-agent-aks-demo'
+param enableContainerNetworkLogs = false
 param managementVirtualNetworkName = 'vnet-sre-agent-aks-demo'
 param managementVirtualNetworkAddressPrefix = '10.250.0.0/24'
 param agentSubnetName = 'snet-sre-agent'
