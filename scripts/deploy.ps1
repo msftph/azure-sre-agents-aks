@@ -8,7 +8,12 @@ param(
     [string]$AksClusterName,
     [string]$SshPublicKeyPath = "$HOME/.ssh/id_rsa.pub",
     [switch]$EnableContainerNetworkLogs,
-    [switch]$SkipRoleAssignments
+    [switch]$SkipRoleAssignments,
+    [switch]$KubernetesOnly,
+    [switch]$DeployStoreDemo,
+    [switch]$ConfigureKedaScaler,
+    [ValidateSet("None", "Arm64", "Arm64AzureLinux")]
+    [string]$ArmNodePoolProfile = "None"
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,6 +56,164 @@ function Register-AzProvider {
     throw "$Namespace did not reach Registered within 10 minutes."
 }
 
+function Assert-AksConfiguration {
+    $systemNodepool = az aks nodepool list `
+      --resource-group $RESOURCE_GROUP `
+      --cluster-name $CLUSTER_NAME `
+      --query "[?mode=='System'] | [0]" `
+      --output json | ConvertFrom-Json
+    Assert-AzCliSucceeded "Reading the AKS system node pool"
+
+    if (
+        $null -eq $systemNodepool -or
+        $systemNodepool.nodeTaints -notcontains "CriticalAddonsOnly=true:NoExecute"
+    ) {
+        throw "The AKS system pool is missing its Bicep-managed CriticalAddonsOnly taint."
+    }
+
+    $kedaEnabled = az aks show `
+      --resource-group $RESOURCE_GROUP `
+      --name $CLUSTER_NAME `
+      --query "workloadAutoScalerProfile.keda.enabled" `
+      --output tsv
+    Assert-AzCliSucceeded "Reading the AKS KEDA add-on state"
+
+    if ($kedaEnabled -ne "true") {
+        throw "KEDA is not enabled on AKS."
+    }
+
+    Write-Host "Verified AKS system-pool taint and KEDA configuration." -ForegroundColor Green
+}
+
+function Invoke-StoreDemoDeployment {
+    $appManifestsDir = Join-Path $PSScriptRoot "../manifests/aks-store"
+    kubectl create namespace pets --dry-run=client --output yaml | kubectl apply --filename -
+    if ($LASTEXITCODE -ne 0) {
+        throw "Creating the pets namespace failed with kubectl exit code $LASTEXITCODE."
+    }
+
+    $baselineManifests = Get-ChildItem `
+      -Path $appManifestsDir `
+      -Filter "*.yaml" `
+      -File |
+      Where-Object { $_.BaseName -notlike "*-changed" } |
+      Sort-Object Name
+
+    foreach ($manifest in $baselineManifests) {
+        kubectl apply --filename $manifest.FullName --namespace pets
+        if ($LASTEXITCODE -ne 0) {
+            throw "Applying '$($manifest.Name)' failed with kubectl exit code $LASTEXITCODE."
+        }
+    }
+
+    Write-Host "Waiting for AKS Store workloads to finish rolling out..." -ForegroundColor Yellow
+    $workloads = kubectl get deployments,statefulsets --namespace pets --output name
+    if ($LASTEXITCODE -ne 0) {
+        throw "Listing pets namespace workloads failed with kubectl exit code $LASTEXITCODE."
+    }
+
+    foreach ($workload in $workloads) {
+        kubectl rollout status $workload --namespace pets --timeout=300s
+        if ($LASTEXITCODE -ne 0) {
+            throw "Rollout for '$workload' did not complete within 300 seconds."
+        }
+    }
+
+    kubectl get all --namespace pets
+    if ($LASTEXITCODE -ne 0) {
+        throw "Listing pets namespace resources failed with kubectl exit code $LASTEXITCODE."
+    }
+
+    $loadBalancerDeadline = (Get-Date).AddMinutes(5)
+    do {
+        $storeIp = kubectl get service store-front --namespace pets -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+        $adminIp = kubectl get service store-admin --namespace pets -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+        if ([string]::IsNullOrWhiteSpace($storeIp) -or [string]::IsNullOrWhiteSpace($adminIp)) {
+            Start-Sleep -Seconds 10
+        }
+    } while (
+        ([string]::IsNullOrWhiteSpace($storeIp) -or [string]::IsNullOrWhiteSpace($adminIp)) -and
+        (Get-Date) -lt $loadBalancerDeadline
+    )
+
+    if ([string]::IsNullOrWhiteSpace($storeIp) -or [string]::IsNullOrWhiteSpace($adminIp)) {
+        throw "The internal load balancers did not receive addresses within 5 minutes."
+    }
+
+    foreach ($serviceName in @("store-front", "store-admin")) {
+        $internal = kubectl get service $serviceName --namespace pets `
+          -o 'jsonpath={.metadata.annotations.service\.beta\.kubernetes\.io/azure-load-balancer-internal}'
+        if ($LASTEXITCODE -ne 0) {
+            throw "Reading the $serviceName internal load balancer annotation failed."
+        }
+        if ($internal -ne "true") {
+            throw "Expected an internal load balancer for '$serviceName'; received '$internal'."
+        }
+    }
+
+    Write-Host "Internal Store Front address: http://$storeIp" -ForegroundColor Cyan
+    Write-Host "Internal Store Admin address: http://$adminIp" -ForegroundColor Cyan
+    Write-Host "Use 'kubectl port-forward --namespace pets service/store-front 8080:80' to open Store Front." -ForegroundColor Cyan
+}
+
+function Invoke-KedaScalerConfiguration {
+    Write-Host "Waiting for KEDA CRDs to become available..."
+    $retries = 0
+    while ($retries -lt 30) {
+        $crd = kubectl get crd scaledobjects.keda.sh --ignore-not-found --output name 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Checking for KEDA CRDs failed with kubectl exit code $LASTEXITCODE."
+        }
+        if ($crd) { break }
+        Start-Sleep -Seconds 10
+        $retries++
+    }
+    if (-not $crd) {
+        throw "Timed out waiting for KEDA CRDs."
+    }
+
+    $scalerManifest = Join-Path $PSScriptRoot "../manifests/virtual-worker-scaler.yaml"
+    kubectl apply --filename $scalerManifest
+    if ($LASTEXITCODE -ne 0) {
+        throw "Applying the virtual-worker KEDA scaler failed with kubectl exit code $LASTEXITCODE."
+    }
+    kubectl get scaledobject,hpa --namespace pets
+    if ($LASTEXITCODE -ne 0) {
+        throw "Verifying the virtual-worker KEDA scaler failed with kubectl exit code $LASTEXITCODE."
+    }
+}
+
+function Invoke-KubernetesSetup {
+    Assert-AksConfiguration
+
+    kubectl get nodes
+    if ($LASTEXITCODE -ne 0) {
+        throw "AKS is not reachable through the current kubectl context. Connect with scripts/Connect-AksViaBastion.ps1 first."
+    }
+
+    if ($DeployStoreDemo) {
+        Invoke-StoreDemoDeployment
+    }
+
+    if ($ArmNodePoolProfile -ne "None") {
+        $profileManifest = if ($ArmNodePoolProfile -eq "Arm64AzureLinux") {
+            "../manifests/arm-nodepool-profile-v2.yaml"
+        } else {
+            "../manifests/arm-nodepool-profile.yaml"
+        }
+        kubectl apply --filename (Join-Path $PSScriptRoot $profileManifest)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Applying the $ArmNodePoolProfile NodePool profile failed with kubectl exit code $LASTEXITCODE."
+        }
+        Write-Host "Applied the $ArmNodePoolProfile NodePool profile." -ForegroundColor Green
+    }
+
+    if ($ConfigureKedaScaler) {
+        Invoke-KedaScalerConfiguration
+        Write-Host "Configured the virtual-worker KEDA scaler." -ForegroundColor Green
+    }
+}
+
 $azVersion = [version]((az version --output json | ConvertFrom-Json).'azure-cli')
 Assert-AzCliSucceeded "Reading the Azure CLI version"
 if ($azVersion -lt [version]"2.85.0") {
@@ -66,6 +229,19 @@ $subscription = az account show --output json | ConvertFrom-Json
 Assert-AzCliSucceeded "Reading the active Azure subscription"
 if (-not $subscription) {
     throw "Log in to Azure before deploying (az login)."
+}
+
+if ($KubernetesOnly) {
+    if ($DeployStoreDemo -or $ConfigureKedaScaler -or $ArmNodePoolProfile -ne "None") {
+        Invoke-KubernetesSetup
+    } else {
+        Assert-AksConfiguration
+    }
+    return
+}
+
+if ($DeployStoreDemo -or $ConfigureKedaScaler -or $ArmNodePoolProfile -ne "None") {
+    throw "Kubernetes setup options require -KubernetesOnly after connecting with scripts/Connect-AksViaBastion.ps1."
 }
 
 $networkFeature = "AllowBringYourOwnPublicIpAddress"
@@ -198,6 +374,8 @@ try {
     $env:AKS_SSH_PUBLIC_KEY = $previousSshPublicKey
 }
 
+Assert-AksConfiguration
+
 $azureMonitorWorkspaceId = $deploymentOutputs.azureMonitorWorkspaceId.value
 $recommendations = az rest `
   --method get `
@@ -255,3 +433,4 @@ Write-Host "Private cluster, Azure Bastion, and SRE Agent are ready." -Foregroun
 Write-Host "Bastion resource: $($deploymentOutputs.bastionId.value)" -ForegroundColor Cyan
 Write-Host "SRE Agent endpoint: $($deploymentOutputs.agentEndpoint.value)" -ForegroundColor Cyan
 Write-Host "Run .\scripts\Connect-AksViaBastion.ps1 to open a kubectl-enabled subshell." -ForegroundColor Cyan
+Write-Host "After connecting, optional AKS workloads can be configured with scripts/deploy.ps1 -KubernetesOnly and its Kubernetes setup options." -ForegroundColor Cyan

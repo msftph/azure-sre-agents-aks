@@ -29,8 +29,8 @@ The source article's Cluster Mesh identity case is not automated here because th
 - Kubernetes 1.33+ for optional ACNS container network logs
 
 The repository's `scripts/deploy.ps1` deploys Cilium, ACNS, and Azure Monitor
-managed Prometheus through Bicep. Create the demo cluster using the root
-[setup instructions](../../README.md#step-2--deploy-the-complete-azure-infrastructure), then open its
+managed Prometheus through Bicep. Deploy the demo cluster using the root
+[deployment instructions](../../README.md#deploy-the-azure-infrastructure), then open its
 private API tunnel before running this scenario:
 
 ```powershell
@@ -100,12 +100,13 @@ For workload-level analysis, query the Azure Monitor workspace output by the
 private-cluster deployment. If you separately configure Azure Managed Grafana,
 its **Azure Managed Prometheus > Kubernetes >
 Networking** dashboards can also show **Drops (Workload)** and **Pod Flows
-(Namespace)**. Step 2 deploys Azure Monitor's recommended recording-rule groups;
+(Namespace)**. The infrastructure deployment includes Azure Monitor's
+recommended recording-rule groups;
 Grafana itself is not deployed by this repository.
 
 The included `manifests/observability.yaml` creates a `ContainerNetworkLog` filter
 when the ACNS logging CRD is available. To persist those flows in Azure Monitor,
-run Step 2 from the repository root with the network-log option before connecting:
+enable network logging during infrastructure deployment before connecting:
 
 ```powershell
 .\scripts\deploy.ps1 -EnableContainerNetworkLogs
