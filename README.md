@@ -8,7 +8,8 @@ network-policy scenario.
 ## Requirements
 
 - Azure CLI and Bicep support (`az bicep install` if needed)
-- PowerShell 7+
+- PowerShell 7+ (for `scripts/deploy.ps1`)
+- `jq` (for `scripts/deploy.sh`)
 - OpenSSH `ssh-keygen` (only needed when no SSH key exists)
 - `kubectl` (for optional Kubernetes configuration)
 - Bash (only for `scripts/deploy.sh`)
@@ -34,16 +35,16 @@ az login
 .\scripts\deploy.ps1
 ```
 
-The Bash entry point forwards its arguments to the PowerShell deployment. To
+The Bash entry point performs the same deployment operations natively. To
 choose a subscription and enable ACNS network-log forwarding:
 
-```powershell
-.\scripts\deploy.ps1 -SubscriptionId "<subscription-id>" -EnableContainerNetworkLogs
+```bash
+./scripts/deploy.sh --subscription-id "<subscription-id>" --enable-container-network-logs
 ```
 
-Use `-SkipRoleAssignments` if equivalent SRE Agent role assignments already
+Use `--skip-role-assignments` if equivalent SRE Agent role assignments already
 exist. The deployment uses `~/.ssh/id_rsa.pub`, generating an RSA key pair if
-needed; use `-SshPublicKeyPath` to select a different public key. Only the
+needed; use `--ssh-public-key-path` to select a different public key. Only the
 public key is passed to Bicep.
 
 `infra/bicep/main.bicep` is the sole subscription-scope entry point, with
@@ -72,28 +73,28 @@ Connect to the private cluster:
 ```
 
 The helper opens a Bastion-backed shell with a usable `kubectl` context. From
-the repository root in that shell, run `deploy.ps1` in Kubernetes-only mode to
+the repository root in that shell, run `deploy.sh` in Kubernetes-only mode to
 verify cluster settings and select optional workload configuration:
 
-```powershell
-.\scripts\deploy.ps1 -KubernetesOnly -DeployStoreDemo -ConfigureKedaScaler
+```bash
+./scripts/deploy.sh --kubernetes-only --deploy-store-demo --configure-keda-scaler
 ```
 
 These options are independent:
 
-- `-DeployStoreDemo` applies the healthy AKS Store manifests and waits for the
+- `--deploy-store-demo` applies the healthy AKS Store manifests and waits for the
   workloads and internal service addresses.
-- `-ConfigureKedaScaler` applies the virtual-worker RabbitMQ scaler after
+- `--configure-keda-scaler` applies the virtual-worker RabbitMQ scaler after
   verifying KEDA's CRDs are available.
-- `-ArmNodePoolProfile Arm64` applies the ARM64 D-family NodePool profile.
-- `-ArmNodePoolProfile Arm64AzureLinux` applies the Azure Linux AKSNodeClass
+- `--arm-nodepool-profile Arm64` applies the ARM64 D-family NodePool profile.
+- `--arm-nodepool-profile Arm64AzureLinux` applies the Azure Linux AKSNodeClass
   and ARM64 NodePool profile.
 
 For example, configure the Store app, scaler, and Azure Linux profile in one
 invocation:
 
-```powershell
-.\scripts\deploy.ps1 -KubernetesOnly -DeployStoreDemo -ConfigureKedaScaler -ArmNodePoolProfile Arm64AzureLinux
+```bash
+./scripts/deploy.sh --kubernetes-only --deploy-store-demo --configure-keda-scaler --arm-nodepool-profile Arm64AzureLinux
 ```
 
 Kubernetes-only mode requires an active Azure login and a working `kubectl`
