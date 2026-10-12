@@ -3,7 +3,7 @@
 #   Prioritises ARM-based D-family VMs via NAP/Karpenter
 # ============================================================
 $ErrorActionPreference = "Stop"
-$manifestsDir = Join-Path $PSScriptRoot "manifests"
+$manifestsDir = Join-Path $PSScriptRoot "..\manifests"
 
 kubectl apply -f (Join-Path $manifestsDir "arm-nodepool-profile.yaml")
 

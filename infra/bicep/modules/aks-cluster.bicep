@@ -4,6 +4,9 @@ param location string
 @description('Name of the private AKS cluster.')
 param aksClusterName string
 
+@description('Name of the AKS-managed node resource group.')
+param nodeResourceGroupName string
+
 @description('Resource ID of the AKS user-assigned managed identity.')
 param aksIdentityId string
 
@@ -47,6 +50,7 @@ resource aksCluster 'Microsoft.ContainerService/managedClusters@2025-07-01' = {
     tier: 'Standard'
   }
   properties: {
+    nodeResourceGroup: nodeResourceGroupName
     dnsPrefix: 'aks-${uniqueString(resourceGroup().id, aksClusterName)}'
     enableRBAC: true
     linuxProfile: {

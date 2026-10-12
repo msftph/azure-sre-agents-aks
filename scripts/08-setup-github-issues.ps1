@@ -10,7 +10,7 @@
 # guided reference you can run at any time.
 # ============================================================
 
-. .\00-variables.ps1
+. (Join-Path $PSScriptRoot "variables.ps1")
 
 $GITHUB_REPO = "hailugebru/azure-sre-agents-aks"
 $SUBAGENT_NAME = "github-issue-tracker"

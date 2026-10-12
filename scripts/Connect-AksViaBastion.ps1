@@ -9,7 +9,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-. "$PSScriptRoot\00-variables.ps1"
+. (Join-Path $PSScriptRoot "variables.ps1")
 
 function Assert-AzCliSucceeded {
     param([Parameter(Mandatory)][string]$Operation)
@@ -28,7 +28,7 @@ if ($azVersion -lt [version]"2.85.0") {
 
 az extension show --name aks-preview --only-show-errors 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    throw "The aks-preview extension is required. Run .\01-prerequisites.ps1 first."
+    throw "The aks-preview extension is required. Run .\scripts\deploy.ps1 first."
 }
 
 $privateFqdn = az aks show `

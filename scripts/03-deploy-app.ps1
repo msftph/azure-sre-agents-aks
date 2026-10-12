@@ -2,7 +2,7 @@
 # Step 3 - Deploy the AKS Store demo application
 # ============================================================
 $ErrorActionPreference = "Stop"
-$appManifestsDir = Join-Path $PSScriptRoot "manifests\aks-store"
+$appManifestsDir = Join-Path $PSScriptRoot "..\manifests\aks-store"
 
 # Create the namespace
 kubectl create ns pets --dry-run=client -o yaml | kubectl apply -f -

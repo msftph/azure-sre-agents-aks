@@ -1,6 +1,6 @@
 using './main.bicep'
 
-param location = 'swedencentral'
+param location = 'canadacentral'
 param resourceGroupName = 'Azure-SRE-Agent-Demo_RG'
 param aksClusterName = 'Azure-SRE-Agent-Demo-Cluster'
 param sshPublicKey = readEnvironmentVariable('AKS_SSH_PUBLIC_KEY')

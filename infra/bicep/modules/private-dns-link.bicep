@@ -1,8 +1,10 @@
-@description('Name of the AKS-managed private DNS zone in this resource group.')
-param privateDnsZoneName string
+@description('Private FQDN of the AKS cluster.')
+param privateFqdn string
 
 @description('Resource ID of the management virtual network.')
 param managementVirtualNetworkId string
+
+var privateDnsZoneName = join(skip(split(privateFqdn, '.'), 1), '.')
 
 resource privateDnsZone 'Microsoft.Network/privateDnsZones@2024-06-01' existing = {
   name: privateDnsZoneName

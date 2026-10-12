@@ -2,8 +2,8 @@
 # Step 7 - Setup KEDA ScaledObject for virtual-worker
 # ============================================================
 $ErrorActionPreference = "Stop"
-. "$PSScriptRoot\00-variables.ps1"
-$manifestsDir = Join-Path $PSScriptRoot "manifests"
+. (Join-Path $PSScriptRoot "variables.ps1")
+$manifestsDir = Join-Path $PSScriptRoot "..\manifests"
 
 Write-Host "=== Setting up KEDA ScaledObject for virtual-worker ===" -ForegroundColor Yellow
 Write-Host ""
@@ -17,7 +17,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Reading the KEDA add-on state failed with Azure CLI exit code $LASTEXITCODE."
 }
 if ($kedaEnabled -ne "true") {
-    throw "KEDA is not enabled. Deploy the private cluster with .\02-create-cluster.ps1 first."
+    throw "KEDA is not enabled. Deploy the private cluster with .\scripts\deploy.ps1 first."
 }
 
 Write-Host "Waiting for KEDA CRDs to become available..."

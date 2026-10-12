@@ -2,7 +2,7 @@
 # Step 4 - Verify the Bicep-managed system taint and monitor NAP
 # ============================================================
 $ErrorActionPreference = "Stop"
-. "$PSScriptRoot\00-variables.ps1"
+. (Join-Path $PSScriptRoot "variables.ps1")
 
 # Inspect the Bicep-managed system node pool
 $systemNodepool = az aks nodepool list `
@@ -14,7 +14,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if ($null -eq $systemNodepool -or $systemNodepool.nodeTaints -notcontains "CriticalAddonsOnly=true:NoExecute") {
-    throw "The system pool is missing its Bicep-managed taint. Deploy the private cluster with .\02-create-cluster.ps1 first."
+    throw "The system pool is missing its Bicep-managed taint. Deploy the private cluster with .\scripts\deploy.ps1 first."
 }
 Write-Host "System nodepool: $($systemNodepool.name)" -ForegroundColor Yellow
 

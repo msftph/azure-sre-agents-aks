@@ -3,7 +3,7 @@
 #   Adds a custom AKSNodeClass for Azure Linux + updates the NodePool
 # ============================================================
 $ErrorActionPreference = "Stop"
-$manifestsDir = Join-Path $PSScriptRoot "manifests"
+$manifestsDir = Join-Path $PSScriptRoot "..\manifests"
 
 kubectl apply -f (Join-Path $manifestsDir "arm-nodepool-profile-v2.yaml")
 
