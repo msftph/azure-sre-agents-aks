@@ -44,7 +44,7 @@ resource aksCluster 'Microsoft.ContainerService/managedClusters@2025-07-01' = {
   }
   sku: {
     name: 'Base'
-    tier: 'Free'
+    tier: 'Standard'
   }
   properties: {
     dnsPrefix: 'aks-${uniqueString(resourceGroup().id, aksClusterName)}'
