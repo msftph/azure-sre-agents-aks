@@ -114,7 +114,7 @@ resource aksCluster 'Microsoft.ContainerService/managedClusters@2025-07-01' = {
         config: {
           logAnalyticsWorkspaceResourceID: logAnalyticsWorkspaceId
           useAADAuth: 'true'
-          enableRetinaNetworkFlags: enableContainerNetworkLogs ? 'true' : 'false'
+          enableRetinaNetworkFlowLogs: enableContainerNetworkLogs ? 'true' : 'false'
         }
       }
     }
