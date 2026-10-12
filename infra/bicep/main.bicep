@@ -1,10 +1,30 @@
-targetScope = 'resourceGroup'
+targetScope = 'subscription'
 
-@description('Azure region for the SRE Agent resources.')
-param location string = resourceGroup().location
+@description('Name of the resource group for the complete demo infrastructure.')
+param resourceGroupName string
 
-@description('Name of the existing AKS cluster the SRE Agent manages.')
+@description('Azure region for the demo infrastructure.')
+param location string
+
+@description('Name of the private AKS cluster the SRE Agent manages.')
 param aksClusterName string
+
+@description('SSH public key for the Linux nodes. Never supply a private key.')
+@minLength(1)
+param sshPublicKey string
+
+@description('VM size for the system node pool.')
+param systemNodeVmSize string = 'Standard_D4s_v5'
+
+@minValue(1)
+@description('Number of nodes in the system node pool.')
+param systemNodeCount int = 3
+
+@description('Name of the Azure Monitor workspace for managed Prometheus.')
+param azureMonitorWorkspaceName string = 'amw-sre-agent-aks-demo'
+
+@description('Forward ACNS container network logs to Container Insights.')
+param enableContainerNetworkLogs bool = false
 
 @description('Name of the Azure SRE Agent resource.')
 param sreAgentName string = 'sre-agent-aks-demo'
@@ -71,8 +91,21 @@ param bastionScaleUnits int = 2
 @description('Create the role assignments required by the demo. Set false when equivalent assignments already exist.')
 param deployRoleAssignments bool = true
 
+var nodeResourceGroupName = 'MC_${resourceGroupName}_${aksClusterName}_${location}'
+
+resource publicIpFeature 'Microsoft.Features/featureProviders/subscriptionFeatureRegistrations@2021-07-01' = {
+  name: 'Microsoft.Network/AllowBringYourOwnPublicIpAddress'
+  properties: {}
+}
+
+resource demoResourceGroup 'Microsoft.Resources/resourceGroups@2024-03-01' = {
+  name: resourceGroupName
+  location: location
+}
+
 module network './modules/network.bicep' = {
-  name: 'sre-agent-network'
+  name: 'private-aks-network'
+  scope: resourceGroup(demoResourceGroup.name)
   params: {
     location: location
     managementVirtualNetworkName: managementVirtualNetworkName
@@ -91,7 +124,8 @@ module network './modules/network.bicep' = {
 }
 
 module aksIdentity './modules/aks-identity.bicep' = {
-  name: 'aks-identity'
+  name: 'private-aks-identity'
+  scope: resourceGroup(demoResourceGroup.name)
   params: {
     location: location
     aksIdentityName: aksIdentityName
@@ -105,7 +139,8 @@ module aksIdentity './modules/aks-identity.bicep' = {
 }
 
 module bastion './modules/bastion.bicep' = {
-  name: 'aks-bastion'
+  name: 'private-aks-bastion'
+  scope: resourceGroup(demoResourceGroup.name)
   params: {
     location: location
     bastionName: bastionName
@@ -116,7 +151,8 @@ module bastion './modules/bastion.bicep' = {
 }
 
 module monitoring './modules/monitoring.bicep' = {
-  name: 'sre-agent-monitoring'
+  name: 'private-aks-monitoring'
+  scope: resourceGroup(demoResourceGroup.name)
   params: {
     location: location
     logAnalyticsWorkspaceName: logAnalyticsWorkspaceName
@@ -124,8 +160,51 @@ module monitoring './modules/monitoring.bicep' = {
   }
 }
 
+module aksCluster './modules/aks-cluster.bicep' = {
+  name: 'private-aks-cluster'
+  scope: resourceGroup(demoResourceGroup.name)
+  params: {
+    location: location
+    aksClusterName: aksClusterName
+    nodeResourceGroupName: nodeResourceGroupName
+    aksIdentityId: aksIdentity.outputs.aksIdentityId
+    aksNodeSubnetId: network.outputs.aksNodeSubnetId
+    aksApiServerSubnetId: network.outputs.aksApiServerSubnetId
+    sshPublicKey: sshPublicKey
+    systemNodeVmSize: systemNodeVmSize
+    systemNodeCount: systemNodeCount
+    logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
+    enableContainerNetworkLogs: enableContainerNetworkLogs
+  }
+}
+
+module aksMonitoring './modules/aks-monitoring.bicep' = {
+  name: 'private-aks-telemetry'
+  scope: resourceGroup(demoResourceGroup.name)
+  params: {
+    location: location
+    aksClusterName: aksClusterName
+    azureMonitorWorkspaceName: azureMonitorWorkspaceName
+    logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
+    enableContainerNetworkLogs: enableContainerNetworkLogs
+  }
+  dependsOn: [
+    aksCluster
+  ]
+}
+
+module privateDnsLink './modules/private-dns-link.bicep' = {
+  name: 'private-aks-management-dns-link'
+  scope: resourceGroup(nodeResourceGroupName)
+  params: {
+    privateFqdn: aksCluster.outputs.privateFqdn
+    managementVirtualNetworkId: network.outputs.managementVirtualNetworkId
+  }
+}
+
 module sreAgent './modules/sre-agent.bicep' = {
   name: 'sre-agent'
+  scope: resourceGroup(demoResourceGroup.name)
   params: {
     location: location
     sreAgentName: sreAgentName
@@ -143,6 +222,11 @@ module sreAgent './modules/sre-agent.bicep' = {
 output agentId string = sreAgent.outputs.agentId
 output agentEndpoint string = sreAgent.outputs.agentEndpoint
 output managedIdentityId string = sreAgent.outputs.managedIdentityId
+output resourceGroupId string = demoResourceGroup.id
+output aksClusterId string = aksCluster.outputs.aksClusterId
+output nodeResourceGroup string = aksCluster.outputs.nodeResourceGroup
+output privateFqdn string = aksCluster.outputs.privateFqdn
+output azureMonitorWorkspaceId string = aksMonitoring.outputs.azureMonitorWorkspaceId
 output managementVirtualNetworkId string = network.outputs.managementVirtualNetworkId
 output aksVirtualNetworkId string = network.outputs.aksVirtualNetworkId
 output agentSubnetId string = network.outputs.agentSubnetId
@@ -152,3 +236,4 @@ output aksIdentityId string = aksIdentity.outputs.aksIdentityId
 output bastionId string = bastion.outputs.bastionId
 output logAnalyticsWorkspaceId string = monitoring.outputs.logAnalyticsWorkspaceId
 output applicationInsightsId string = monitoring.outputs.applicationInsightsId
+output privateDnsLinkId string = privateDnsLink.outputs.privateDnsLinkId

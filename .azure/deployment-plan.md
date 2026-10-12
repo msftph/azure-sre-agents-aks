@@ -1,6 +1,9 @@
 # Azure Deployment Plan
 
 > **Status:** Validated
+>
+> Historical deployment notes. The current consolidated Bicep entry point and
+> deployment scripts are documented in the repository root `README.md`.
 
 Updated: 2026-10-07
 
